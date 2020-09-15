@@ -37,7 +37,9 @@ auto ddp_solver_t<Problem>::
       DDP_BIND(auto&&, (xu_new, xu_old, fb), zipped);
       index_t t = xu_new.current_index();
 
-      xu_new.u() = xu_old.u() + step * fb.val();
+      xu_new.u() = xu_old.u()        //
+                   + step * fb.val() //
+                   + fb.jac() * (xu_new.x() - xu_old.x());
       auto xu_new_c = xu_new.as_const();
       prob.eval_f_to(xu_new.x_next(), t, xu_new_c.x(), xu_new_c.u());
     }

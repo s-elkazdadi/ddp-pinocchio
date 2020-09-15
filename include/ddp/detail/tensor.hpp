@@ -2,8 +2,8 @@
 #define TENSOR_HPP_PTZWQRYY
 
 #include "../indexer.hpp"
-#include <memory>
 #include <functional>
+#include <memory>
 
 namespace ddp {
 namespace indexing {
@@ -234,6 +234,18 @@ struct tensor_view_t {
       }
     }
     return false;
+  }
+
+  void print() const {
+    for (index_t k = 0; k < m_outdim.value(); ++k) {
+      for (index_t i = 0; i < m_indiml.value(); ++i) {
+        for (index_t j = 0; j < m_indimr.value(); ++j) {
+          fmt::print("{:>15}  ", (*this)(k, i, j));
+        }
+        fmt::print("\n");
+      }
+      fmt::print("\n");
+    }
   }
 
   auto as_const_view() const noexcept -> tensor_view_t<value_type const, Out_Dim, In_DimL, In_DimR> {

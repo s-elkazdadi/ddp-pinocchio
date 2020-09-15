@@ -21,21 +21,20 @@ auto ddp_solver_t<Problem>::
   // clang-format on
   bool success = false;
   auto ctrl_fb = control_feedback_t{u_idx, model};
-  auto const& d = derivatives;
 
   // TODO preallocate V_{x,xx}, Q_{x,u,xx,ux,uu}
   while (not success) {
-    auto V_xx = d.lfxx.eval();
-    auto V_x = d.lfx.transpose().eval();
+    auto V_xx = derivatives.lfxx.eval();
+    auto V_x = derivatives.lfx.transpose().eval();
 
     for (auto zipped :    //
          ranges::reverse( //
              ranges::zip(
-                 current_traj, //
-                 d.l(),
-                 d.f(),
-                 d.eq(),
-                 mults.eq,
+                 current_traj,     //
+                 derivatives.l(),  //
+                 derivatives.f(),  //
+                 derivatives.eq(), //
+                 mults.eq,         //
                  ctrl_fb))) {
       DDP_BIND(auto&&, (xu, l, f, eq, eq_mult, u_fb), zipped);
       index_t t = xu.current_index();
@@ -50,9 +49,12 @@ auto ddp_solver_t<Problem>::
       auto const tmp2 = eigen::as_const_view(tmp2_);
       auto const v_x = eigen::as_const_view(V_x);
 
-      assert(isfinite(mu));
-      assert(not pe.hasNaN());
-      assert(not pe_x.hasNaN());
+      {
+        using std::isfinite;
+        assert(isfinite(mu));
+        assert(not pe.hasNaN());
+        assert(not pe_x.hasNaN());
+      }
 
       // clang-format off
       auto Q_x         = l.x.transpose().eval();                  auto Q_x_v = eigen::as_mut_view(Q_x);
@@ -79,7 +81,7 @@ auto ddp_solver_t<Problem>::
 
       auto Q_ux         = l.ux.eval();                            auto Q_ux_v = eigen::as_mut_view(Q_ux);
       Q_ux_v.noalias() += f.u.transpose() * V_xx * f.x;
-      Q_ux_v.noalias() += mu * (eq.u.transpose() * tmp2);
+      Q_ux_v.noalias() +=  eq.u.transpose() * tmp2;
       eq.ux.noalias_contract_add_outdim(Q_ux_v, tmp);
       f .ux.noalias_contract_add_outdim(Q_ux_v, v_x);
       // clang-format on
@@ -93,6 +95,10 @@ auto ddp_solver_t<Problem>::
         }
         mu *= 2;
         regularization *= 2;
+        fmt::print("t  : {}\n", t);
+        fmt::print("mu : {}\n", mu);
+        fmt::print("reg: {}\n", regularization);
+        fmt::print("Quu:\n{}\n\n", Q_uu);
         break;
       }
 
@@ -110,6 +116,8 @@ auto ddp_solver_t<Problem>::
       V_xx            = Q_xx;
       V_xx.noalias() += Q_ux.transpose() * K;
       // clang-format on
+
+      fmt::print("feedback norm: {}\n", k.norm());
 
       if (t == 0) {
         success = true;

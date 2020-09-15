@@ -538,7 +538,8 @@ struct problem_t {
             eigen::as_const_view(u_));
 
         // mat_t commutator_jac{nv, nv};
-        // compute_commutator_jacobian(eigen::as_mut_view(commutator_jac), eigen::as_const_view(dx.topRows(nv)));
+        // compute_commutator_jacobian(eigen::as_mut_view(commutator_jac),
+        // eigen::as_const_view(dx.topRows(nv)));
 
         if (at_x) {
 
@@ -627,7 +628,8 @@ struct problem_t {
             eigen::as_const_view(u_));
 
         // mat_t commutator_jac{nv, nv};
-        // compute_commutator_jacobian(eigen::as_mut_view(commutator_jac), eigen::as_const_view(dx.topRows(nv)));
+        // compute_commutator_jacobian(eigen::as_mut_view(commutator_jac),
+        // eigen::as_const_view(dx.topRows(nv)));
 
         if (at_x) {
 
@@ -1260,7 +1262,7 @@ auto main() -> int {
     auto mults = solver.zero_multipliers<M>();
 
     prob.compute_derivatives(derivs, traj);
-    auto bres = solver.backward_pass<M>(traj, mults, 0.0, 1.0, derivs);
+    auto bres = solver.backward_pass<M>(traj, mults, reg, mu, derivs);
 
     mu = bres.mu;
     reg = bres.reg;
@@ -1289,6 +1291,7 @@ auto main() -> int {
       fres = solver.forward_pass<M>(new_traj, traj, mults, bres, true);
 
       traj = new_traj.clone();
+      fmt::print("step: {}\n", fres);
       for (auto eq : derivs.eq()) {
         fmt::print("eq: {}\n", eq.val.transpose());
         std::fflush(stdout);
