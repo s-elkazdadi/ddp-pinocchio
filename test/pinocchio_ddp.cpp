@@ -1,8 +1,10 @@
 #define EIGEN_DEFAULT_IO_FORMAT Eigen::IOFormat(3, 0, "  ", "\n", "", "")
+#include "ddp/detail/utils.hpp"
 
 #include "ddp/pinocchio_model.hpp"
-#include "ddp/ddp_bwd.ipp"
 #include "ddp/ddp.hpp"
+#include "ddp/ddp_bwd.ipp"
+#include "ddp/ddp_fwd.ipp"
 
 #include <fmt/ostream.h>
 #include <fmt/chrono.h>
@@ -37,6 +39,46 @@ struct chronometer_t {
   }
 };
 
+template <typename Out, typename XX, typename UX, typename UU, typename DX, typename DU>
+void add_second_order_term(Out&& out, XX const& xx, UX const& ux, UU const& uu, DX const& dx, DU const& du) {
+  DDP_ASSERT(out.cols() == 1, "wrong dimensions");
+  DDP_ASSERT(out.rows() == xx.outdim().value(), "wrong dimensions");
+  DDP_ASSERT(out.rows() == ux.outdim().value(), "wrong dimensions");
+  DDP_ASSERT(out.rows() == uu.outdim().value(), "wrong dimensions");
+
+  DDP_ASSERT(dx.rows() == xx.indiml().value(), "wrong dimensions");
+  DDP_ASSERT(dx.rows() == xx.indimr().value(), "wrong dimensions");
+  DDP_ASSERT(dx.rows() == ux.indimr().value(), "wrong dimensions");
+
+  DDP_ASSERT(du.rows() == uu.indiml().value(), "wrong dimensions");
+  DDP_ASSERT(du.rows() == uu.indimr().value(), "wrong dimensions");
+  DDP_ASSERT(du.rows() == ux.indiml().value(), "wrong dimensions");
+
+  for (index_t j = 0; j < dx.rows(); ++j) {
+    for (index_t i = 0; i < dx.rows(); ++i) {
+      for (index_t k = 0; k < out.rows(); ++k) {
+        out(k) += 0.5 * dx(i) * xx(k, i, j) * dx(j);
+      }
+    }
+  }
+
+  for (index_t j = 0; j < du.rows(); ++j) {
+    for (index_t i = 0; i < du.rows(); ++i) {
+      for (index_t k = 0; k < out.rows(); ++k) {
+        out(k) += 0.5 * du(i) * uu(k, i, j) * du(j);
+      }
+    }
+  }
+
+  for (index_t j = 0; j < dx.rows(); ++j) {
+    for (index_t i = 0; i < du.rows(); ++i) {
+      for (index_t k = 0; k < out.rows(); ++k) {
+        out(k) += du(i) * ux(k, i, j) * dx(j);
+      }
+    }
+  }
+}
+
 struct problem_t {
   using scalar_t = ::scalar_t;
   using model_t = pinocchio::model_t<scalar_t>;
@@ -67,7 +109,7 @@ struct problem_t {
   }
   auto l(index_t t, x_const x, u_const u) const -> scalar_t {
     detail::unused(this, t, x);
-    return u.squaredNorm();
+    return 0.5 * u.squaredNorm();
   }
   void eval_f_to(x_mut x_out, index_t t, x_const x, u_const u) const {
     detail::unused(t);
@@ -99,8 +141,6 @@ struct problem_t {
   }
   void eval_eq_to(eq_mut eq_out, index_t t, x_const x, u_const u) const {
     detail::unused(t, u);
-    static auto const q_ref = m_model._neutral_configuration();
-
     vec_t x_n{m_model.configuration_dim() + m_model.tangent_dim()};
     vec_t x_nn{m_model.configuration_dim() + m_model.tangent_dim()};
     eval_f_to(eigen::as_mut_view(x_n), t, x, u);
@@ -109,7 +149,7 @@ struct problem_t {
     // eq = q_in - q0
     m_model.difference(                                                 //
         eq_out,                                                         //
-        eigen::as_const_view(q_ref),                                    //
+        eigen::as_const_view(m_eq_ref),                                 //
         eigen::as_const_view(x_nn.topRows(m_model.configuration_dim())) //
     );
   }
@@ -135,7 +175,6 @@ struct problem_t {
       x_const x,               //
       u_const u                //
   ) const {
-    static auto const q_ref = m_model._neutral_configuration();
 
     index_t nq = m_model.configuration_dim();
     index_t nv = m_model.tangent_dim();
@@ -186,12 +225,12 @@ struct problem_t {
     {
       m_model.difference( //
           eq_v,
-          eigen::as_const_view(q_ref),
+          eigen::as_const_view(m_eq_ref),
           eigen::as_const_view(x_nn.topRows(nq)));
     }
     // first derivatives
     {
-      auto d_diff = m_model._d_difference_dq_finish(q_ref, x_nn.topRows(nq));
+      auto d_diff = m_model._d_difference_dq_finish(m_eq_ref, x_nn.topRows(nq));
 
       eq_x.noalias() = d_diff * (fx_nn * fx_n).topRows(nv);
       eq_u.noalias() = d_diff * (fx_nn * fu_n).topRows(nv);
@@ -303,6 +342,320 @@ struct problem_t {
         }
 
         in_var_1 = 0;
+      }
+    }
+  }
+
+  void compute_commutator_jacobian(mat_mut_view_t jac, eigen::view_t<vec_t const> dq) const {
+    // jac (nv, nv)
+    //
+    // jac × dy = [ dq , dy ]
+    //          = ((Id + dv) + dy) - ((Id + dy) + dv)
+
+    using std::sqrt;
+    scalar_t eps = sqrt(std::numeric_limits<scalar_t>::epsilon());
+
+    index_t nq = m_model.configuration_dim();
+    index_t nv = m_model.tangent_dim();
+
+    vec_t q_0{nq};
+    vec_t q_1{nq};
+    vec_t q_2{nq};
+    vec_t tmp{nq};
+
+    m_model.neutral_configuration(eigen::as_mut_view(q_0));
+
+    vec_t dy = vec_t::Zero(nv);
+
+    for (index_t i = 0; i < nv; ++i) {
+      dy[i] = eps;
+
+      q_1 = q_0;
+      m_model.integrate(eigen::as_mut_view(q_1), eigen::as_const_view(q_0), eigen::as_const_view(dq));
+      tmp = q_1;
+      m_model.integrate(eigen::as_mut_view(q_1), eigen::as_const_view(tmp), eigen::as_const_view(dy));
+
+      q_2 = q_0;
+      m_model.integrate(eigen::as_mut_view(q_2), eigen::as_const_view(q_0), eigen::as_const_view(dy));
+      tmp = q_2;
+      m_model.integrate(eigen::as_mut_view(q_2), eigen::as_const_view(tmp), eigen::as_const_view(dq));
+
+      m_model.difference(eigen::as_mut_view(jac.col(i)), eigen::as_const_view(q_1), eigen::as_const_view(q_2));
+      jac.col(i) /= eps;
+
+      dy[i] = 0;
+    }
+  }
+  void compute_eq_derivatives_first( //
+      mat_mut_view_t eq_x,           //
+      mat_mut_view_t eq_u,           //
+      eq_mut eq_v,                   //
+      index_t t,                     //
+      x_const x,                     //
+      u_const u                      //
+  ) const {
+
+    index_t nq = m_model.configuration_dim();
+    index_t nv = m_model.tangent_dim();
+
+    mat_t fx_n{2 * nv, 2 * nv};
+    mat_t fu_n{2 * nv, nv};
+
+    tensor_t fxx_nn{dyn_index{2 * nv}, dyn_index{2 * nv}, dyn_index{2 * nv}};
+    tensor_t fux_nn{dyn_index{2 * nv}, dyn_index{nv}, dyn_index{2 * nv}};
+    tensor_t fuu_nn{dyn_index{2 * nv}, dyn_index{nv}, dyn_index{nv}};
+
+    mat_t fx_nn{2 * nv, 2 * nv};
+    mat_t fu_nn{2 * nv, nv};
+
+    vec_t x_n{m_model.configuration_dim() + m_model.tangent_dim()};
+    vec_t x_nn{m_model.configuration_dim() + m_model.tangent_dim()};
+    eval_f_to(eigen::as_mut_view(x_n), t, x, u);
+    eval_f_to(eigen::as_mut_view(x_nn), t + 1, eigen::as_const_view(x_n), u);
+
+    compute_f_derivatives_first(eigen::as_mut_view(fx_n), eigen::as_mut_view(fu_n), t, x, u);
+
+    compute_f_derivatives_first(
+        eigen::as_mut_view(fx_nn),
+        eigen::as_mut_view(fu_nn),
+        t + 1,
+        eigen::as_const_view(x_n),
+        u);
+
+    // eq(t, x, u) = f(t+1, f(t, x, u), u)
+    {
+      m_model.difference( //
+          eq_v,
+          eigen::as_const_view(m_eq_ref),
+          eigen::as_const_view(x_nn.topRows(nq)));
+    }
+
+    // first derivatives
+    {
+      auto d_diff = m_model._d_difference_dq_finish(m_eq_ref, x_nn.topRows(nq));
+
+      eq_x.noalias() = d_diff * (fx_nn * fx_n).topRows(nv);
+      eq_u.noalias() = d_diff * (fx_nn * fu_n).topRows(nv);
+    }
+  }
+
+  void compute_f_derivatives_first( //
+      mat_mut_view_t fx,            //
+      mat_mut_view_t fu,            //
+      index_t t,                    //
+      x_const x,                    //
+      u_const u                     //
+  ) const {
+    index_t nq = m_model.configuration_dim();
+    index_t nv = m_model.tangent_dim();
+
+    auto q = eigen::as_const_view(x.topRows(nq));
+    auto v = eigen::as_const_view(x.bottomRows(nv));
+
+    // v_out = dt * v_in;
+    fx.col(0).bottomRows(nv) = dt * v;
+    auto dt_v = eigen::as_const_view(fx.col(0).bottomRows(nv));
+
+    // q_out = q_in + dt * v_in
+    m_model.d_integrate_dq(eigen::as_mut_view(fx.topLeftCorner(nv, nv)), q, dt_v);
+    m_model.d_integrate_dv(eigen::as_mut_view(fx.topRightCorner(nv, nv)), q, dt_v);
+    fx.topRightCorner(nv, nv) *= dt;
+
+    // v_out = acc
+    fu.topRows(nv).setZero();
+    m_model.d_dynamics_aba( //
+        eigen::as_mut_view(fx.bottomLeftCorner(nv, nv)),
+        eigen::as_mut_view(fx.bottomRightCorner(nv, nv)),
+        eigen::as_mut_view(fu.bottomRows(nv)),
+        q,
+        v,
+        u);
+
+    // v_out = v_in + dt * v_out
+    //       = v_in + dt * acc
+    fx.bottomRows(nv) *= dt;
+    fx.bottomRightCorner(nv, nv) += mat_t::Identity(nv, nv);
+    fu.bottomRows(nv) *= dt;
+  }
+
+  void compute_eq_derivatives_2( //
+      tensor_mut_view_t eq_xx,   //
+      tensor_mut_view_t eq_ux,   //
+      tensor_mut_view_t eq_uu,   //
+      mat_mut_view_t eq_x,       //
+      mat_mut_view_t eq_u,       //
+      eq_mut eq_val,             //
+      index_t t,                 //
+      x_const x,                 //
+      u_const u) const {
+
+    index_t nq = m_model.configuration_dim();
+    index_t nv = m_model.tangent_dim();
+    index_t ne = eq_val.rows();
+
+    auto q = eigen::as_const_view(x.topRows(nq));
+    auto v = eigen::as_const_view(x.bottomRows(nv));
+
+    compute_eq_derivatives_first(eq_x, eq_u, eq_val, t, x, u);
+    // compute second derivatives
+    {
+      auto eq = eigen::as_const_view(eq_val);
+
+      mat_t eq_x_{ne, nv + nv};
+      mat_t eq_u_{ne, nv};
+      vec_t eq_{ne};
+
+      vec_t x_ = x;
+      vec_t u_ = u;
+
+      vec_t dx = vec_t::Zero(nv + nv);
+      vec_t du = vec_t::Zero(nv);
+
+      using std::sqrt;
+      scalar_t eps = sqrt(std::numeric_limits<scalar_t>::epsilon());
+
+      for (index_t i = 0; i < 3 * nv; ++i) {
+        bool at_x = (i < (2 * nv));
+        index_t idx = at_x ? i : (i - 2 * nv);
+
+        scalar_t& in_var = at_x ? dx[idx] : du[idx];
+
+        in_var = eps;
+
+        m_model.integrate(
+            eigen::as_mut_view(x_.topRows(nq)),
+            eigen::as_const_view(x.topRows(nq)),
+            eigen::as_const_view(dx.topRows(nv)));
+        x_.bottomRows(nv) = x.bottomRows(nv) + dx.bottomRows(nv);
+        u_ = u + du;
+
+        compute_eq_derivatives_first(
+            eigen::as_mut_view(eq_x_),
+            eigen::as_mut_view(eq_u_),
+            eigen::as_mut_view(eq_),
+            t,
+            eigen::as_const_view(x_),
+            eigen::as_const_view(u_));
+
+        // mat_t commutator_jac{nv, nv};
+        // compute_commutator_jacobian(eigen::as_mut_view(commutator_jac), eigen::as_const_view(dx.topRows(nv)));
+
+        if (at_x) {
+
+          for (index_t k = 0; k < ne; ++k) {
+            for (index_t j = 0; j < nv + nv; ++j) {
+              eq_xx(k, j, idx) = (eq_x_(k, j) - eq_x(k, j)) / eps;
+            }
+            for (index_t j = 0; j < nv; ++j) {
+              eq_ux(k, j, idx) = (eq_u_(k, j) - eq_u(k, j)) / eps;
+            }
+          }
+
+          // mat_t tmp = -0.5 * eq_x.leftCols(nv) * commutator_jac;
+          // for (index_t k = 0; k < ne; ++k) {
+          //   for (index_t j = 0; j < nv; ++j) {
+          //     eq_xx(k, j, idx) += tmp(k, j);
+          //   }
+          // }
+
+        } else {
+          for (index_t k = 0; k < ne; ++k) {
+            for (index_t j = 0; j < nv; ++j) {
+              eq_uu(k, j, idx) = (eq_u_(k, j) - eq_u(k, j)) / eps;
+            }
+          }
+        }
+
+        in_var = 0;
+      }
+    }
+  }
+
+  void compute_f_derivatives_2( //
+      tensor_mut_view_t fxx,    //
+      tensor_mut_view_t fux,    //
+      tensor_mut_view_t fuu,    //
+      mat_mut_view_t fx,        //
+      mat_mut_view_t fu,        //
+      index_t t,                //
+      x_const x,                //
+      u_const u,                //
+      x_const x_next            //
+  ) const {
+
+    index_t nq = m_model.configuration_dim();
+    index_t nv = m_model.tangent_dim();
+
+    auto q = eigen::as_const_view(x.topRows(nq));
+    auto v = eigen::as_const_view(x.bottomRows(nv));
+
+    compute_f_derivatives_first(fx, fu, t, x, u);
+    // compute second derivatives
+    {
+      mat_t fx_{nv + nv, nv + nv};
+      mat_t fu_{nv + nv, nv};
+
+      vec_t x_ = x;
+      vec_t u_ = u;
+
+      vec_t dx = vec_t::Zero(nv + nv);
+      vec_t du = vec_t::Zero(nv);
+
+      using std::sqrt;
+      scalar_t eps = sqrt(std::numeric_limits<scalar_t>::epsilon());
+
+      for (index_t i = 0; i < 3 * nv; ++i) {
+        bool at_x = (i < (2 * nv));
+        index_t idx = at_x ? i : (i - 2 * nv);
+
+        scalar_t& in_var = at_x ? dx[idx] : du[idx];
+
+        in_var = eps;
+
+        m_model.integrate(
+            eigen::as_mut_view(x_.topRows(nq)),
+            eigen::as_const_view(x.topRows(nq)),
+            eigen::as_const_view(dx.topRows(nv)));
+        x_.bottomRows(nv) = x.bottomRows(nv) + dx.bottomRows(nv);
+        u_ = u + du;
+
+        compute_f_derivatives_first(
+            eigen::as_mut_view(fx_),
+            eigen::as_mut_view(fu_),
+            t,
+            eigen::as_const_view(x_),
+            eigen::as_const_view(u_));
+
+        // mat_t commutator_jac{nv, nv};
+        // compute_commutator_jacobian(eigen::as_mut_view(commutator_jac), eigen::as_const_view(dx.topRows(nv)));
+
+        if (at_x) {
+
+          for (index_t k = 0; k < nv + nv; ++k) {
+            for (index_t j = 0; j < nv + nv; ++j) {
+              fxx(k, j, idx) = (fx_(k, j) - fx(k, j)) / eps;
+            }
+            for (index_t j = 0; j < nv; ++j) {
+              fux(k, j, idx) = (fu_(k, j) - fu(k, j)) / eps;
+            }
+          }
+
+          // mat_t tmp = -0.5 * fx.leftCols(nv) * commutator_jac;
+          // for (index_t k = 0; k < nv + nv; ++k) {
+          //   for (index_t j = 0; j < nv; ++j) {
+          //     fxx(k, j, idx) -= 0.5 * tmp(k, j);
+          //   }
+          // }
+
+        } else {
+          for (index_t k = 0; k < nv + nv; ++k) {
+            for (index_t j = 0; j < nv; ++j) {
+              fuu(k, j, idx) = (fu_(k, j) - fu(k, j)) / eps;
+            }
+          }
+        }
+
+        in_var = 0;
       }
     }
   }
@@ -498,7 +851,8 @@ struct problem_t {
     }
   }
 
-  auto compute_derivatives(derivative_storage_t& derivs, trajectory_t const& traj) const {
+  auto compute_derivatives(
+      derivative_storage_t& derivs, trajectory_t const& traj, bool use_order2_finite_diff = false) const {
 
     derivs.lfx.setZero();
     derivs.lfxx.setZero();
@@ -516,13 +870,17 @@ struct problem_t {
           xu), zipped);
       // clang-format on
 
+      assert(not xu.x().hasNaN());
+      assert(not xu.x_next().hasNaN());
+      assert(not xu.u().hasNaN());
+
       lx.get().setZero();
       lxx.get().setZero();
       lux.get().setZero();
       lu.get() = xu.u().transpose();
       luu.get().setIdentity();
 
-      {
+      if (use_order2_finite_diff) {
         chronometer_t c("computing f derivatives");
         compute_f_derivatives(
             fxx.get(),
@@ -534,9 +892,20 @@ struct problem_t {
             xu.x(),
             xu.u(),
             xu.x_next());
+      } else {
+        chronometer_t c("computing f derivatives");
+        compute_f_derivatives_2(
+            fxx.get(),
+            fux.get(),
+            fuu.get(),
+            fx.get(),
+            fu.get(),
+            xu.current_index(),
+            xu.x(),
+            xu.u(),
+            xu.x_next());
       }
-#if 1
-      {
+      if (use_order2_finite_diff) {
         chronometer_t c("computing eq derivatives");
         compute_eq_derivatives(
             eq_xx.get(),
@@ -548,8 +917,122 @@ struct problem_t {
             xu.current_index(),
             xu.x(),
             xu.u());
+      } else {
+        chronometer_t c("computing eq derivatives");
+        compute_eq_derivatives_2(
+            eq_xx.get(),
+            eq_ux.get(),
+            eq_uu.get(),
+            eq_x.get(),
+            eq_u.get(),
+            eq_v.get(),
+            xu.current_index(),
+            xu.x(),
+            xu.u());
       }
-#endif
+
+      // finite difference check
+      {
+        assert(not eq_v.get().hasNaN());
+        assert(not eq_x.get().hasNaN());
+        assert(not eq_u.get().hasNaN());
+        assert(not eq_xx.get().has_nan());
+        assert(not eq_ux.get().has_nan());
+        assert(not eq_uu.get().has_nan());
+
+        assert(not fx.get().hasNaN());
+        assert(not fu.get().hasNaN());
+        assert(not fxx.get().has_nan());
+        assert(not fux.get().has_nan());
+        assert(not fuu.get().has_nan());
+
+        auto nq = m_model.configuration_dim();
+        auto nv = m_model.tangent_dim();
+        auto ne = eq_v.get().rows();
+
+        auto t = xu.current_index();
+        auto x = xu.x();
+        auto u = xu.u();
+
+        scalar_t l;
+        vec_t f{nq + nv};
+        vec_t eq{ne};
+
+        scalar_t l_;
+        vec_t f_{nq + nv};
+        vec_t eq_{ne};
+
+        scalar_t eps_x = 1e-20;
+        scalar_t eps_u = 1e-20;
+
+        vec_t dx = eps_x * vec_t::Random(nv + nv);
+        vec_t du = eps_u * vec_t::Random(nv);
+
+        vec_t x_{nq + nv};
+        m_model.integrate(
+            eigen::as_mut_view(x_.topRows(nq)),
+            eigen::as_const_view(x.topRows(nq)),
+            eigen::as_const_view(dx.topRows(nv)));
+        x_.bottomRows(nv) = x.bottomRows(nv) + dx.bottomRows(nv);
+
+        vec_t u_ = u + du;
+
+        l = this->l(t, x, u);
+        eval_f_to(eigen::as_mut_view(f), t, x, u);
+        eval_eq_to(eigen::as_mut_view(eq), t, x, u);
+
+        l_ = this->l(t, eigen::as_const_view(x_), eigen::as_const_view(u_));
+        eval_f_to(eigen::as_mut_view(f_), t, eigen::as_const_view(x_), eigen::as_const_view(u_));
+        eval_eq_to(eigen::as_mut_view(eq_), t, eigen::as_const_view(x_), eigen::as_const_view(u_));
+
+        scalar_t dl;
+        vec_t df{nv + nv};
+        vec_t deq{ne};
+
+        scalar_t ddl;
+        vec_t ddf{nv + nv};
+        vec_t ddeq{ne};
+
+        scalar_t dddl;
+        vec_t dddf{nv + nv};
+        vec_t dddeq{ne};
+
+        dl = l_ - l;
+        m_model.difference(
+            eigen::as_mut_view(df.topRows(nv)),
+            eigen::as_const_view(f.topRows(nq)),
+            eigen::as_const_view(f_.topRows(nq)));
+        df.bottomRows(nv) = f_.bottomRows(nv) - f.bottomRows(nv);
+        deq = eq_ - eq;
+
+        ddl = dl - (lx.get() * dx + lu.get() * du).value();
+        ddf = df - (fx.get() * dx + fu.get() * du);
+        ddeq = deq - (eq_x.get() * dx + eq_u.get() * du);
+
+        dddl = ddl - (0.5 * dx.transpose() * lxx.get() * dx   //
+                      + 0.5 * du.transpose() * luu.get() * du //
+                      + du.transpose() * lux.get() * dx)
+                         .value();
+        dddf = -ddf;
+        dddeq = -ddeq;
+
+        add_second_order_term(dddf, fxx.get(), fux.get(), fuu.get(), dx, du);
+        add_second_order_term(dddeq, eq_xx.get(), eq_ux.get(), eq_uu.get(), dx, du);
+
+        dddf = -dddf;
+        dddeq = -dddeq;
+
+        if (l != 0) {
+          assert(fabs(ddl) / fabs(dl) < sqrt(eps_x + eps_u));
+          assert(fabs(dddl) / fabs(ddl) < sqrt(eps_x + eps_u));
+        }
+
+        assert(ddf.norm() / df.norm() < sqrt(eps_x + eps_u));
+        assert(dddf.norm() / ddf.norm() < sqrt(eps_x + eps_u));
+
+        assert(ddeq.norm() / deq.norm() < sqrt(eps_x + eps_u));
+        assert(dddeq.norm() / ddeq.norm() < sqrt(eps_x + eps_u));
+      }
     }
   }
 
@@ -560,15 +1043,20 @@ struct problem_t {
   index_t m_begin;
   index_t m_end;
   scalar_t dt;
-  eigen::matrix_from_idx_t<scalar_t, eq_indexer_t> eq_ref;
+  vec_t m_eq_ref = m_model._neutral_configuration();
 };
 
 auto main() -> int {
-  constexpr static index_t horizon = 2;
 
   using vec_t = Eigen::Matrix<scalar_t, -1, 1>;
 
+#if 0
   auto model = problem_t::model_t::all_joints_test_model();
+  constexpr static index_t horizon = 1;
+#else
+  auto model = problem_t::model_t{"~/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf"};
+  constexpr static index_t horizon = 5;
+#endif
   auto nq = model.configuration_dim();
   auto nv = model.tangent_dim();
   auto x_init = [&] {
@@ -579,7 +1067,7 @@ auto main() -> int {
     return x;
   }();
 
-  problem_t prob{model, 0, horizon, 0.01, x_init};
+  problem_t prob{model, 0, horizon, 0.01};
   auto u_idx = indexing::vec_regular_indexer(0, horizon, dyn_index{nv});
   auto eq_idx = indexing::vec_regular_indexer(0, horizon, dyn_index{nv});
 
@@ -599,128 +1087,212 @@ auto main() -> int {
 
   ddp_solver_t<problem_t> solver{model, prob, u_idx, eq_idx, x_init};
 
-  auto traj = solver.make_trajectory(control_generator_t{u_idx});
+  {
+    auto traj = solver.make_trajectory(control_generator_t{u_idx});
 
-  constexpr auto M = method::primal_dual_affine_multipliers;
-  auto mults = solver.zero_multipliers<M>();
-
-  for (auto xu : traj) {
-    fmt::print( //
-        "q : {}\n"
-        "v : {}\n"
-        "u : {}\n"
-        "\n",
-        xu.x().topRows(nq).transpose(),
-        xu.x().bottomRows(nv).transpose(),
-        xu.u().transpose());
-  }
-
-  auto d = solver.uninit_derivative_storage();
-  prob.compute_derivatives(d, traj);
-
-  // testing derivatives
-  auto eps_x = 1e-20;
-  auto eps_u = 1e-20;
-  for (auto zipped : ranges::zip(traj, d.l(), d.f(), d.eq())) {
-    DDP_BIND(auto, (xu, l, f, eq), zipped);
-
-    auto t = xu.current_index();
-    auto x = xu.as_const().x();
-    auto u = xu.as_const().u();
-
-    vec_t x_h = xu.x().eval();
-    vec_t u_h = (xu.u()).eval();
-
-    vec_t dx = eps_x * vec_t::Random(nv + nv);
-    vec_t du = eps_u * vec_t::Random(nv);
-
-    // set up u + du, x + dx
-    {
-      x_h.bottomRows(nv) += dx.bottomRows(nv);
-      model.integrate( //
-          eigen::as_mut_view(x_h.topRows(nq)),
-          eigen::as_const_view(x.topRows(nq)),
-          eigen::as_const_view(dx.topRows(nv)));
-      u_h += du;
+    for (auto xu : traj) {
+      fmt::print( //
+          "q : {}\n"
+          "v : {}\n"
+          "u : {}\n"
+          "\n",
+          xu.x().topRows(nq).transpose(),
+          xu.x().bottomRows(nv).transpose(),
+          xu.u().transpose());
     }
 
-    {
-      vec_t f1{nq + nv};
-      prob.eval_f_to(eigen::as_mut_view(f1), t, eigen::as_const_view(x_h), eigen::as_const_view(u_h));
+    auto d = solver.uninit_derivative_storage();
+    auto d2 = solver.uninit_derivative_storage();
+    prob.compute_derivatives(d, traj, true);
+    prob.compute_derivatives(d2, traj, false);
 
-      vec_t df{nv + nv};
+    // testing derivatives
+    auto eps_x = 1e-20;
+    auto eps_u = 1e-20;
+    for (auto zipped : ranges::zip(traj, d.f(), d.eq(), d2.eq())) {
+      DDP_BIND(auto, (xu, f, eq, eq2), zipped);
 
-      df.bottomRows(nv) = (f1 - xu.x_next()).bottomRows(nv);
+      auto t = xu.current_index();
+      auto x = xu.as_const().x();
+      auto u = xu.as_const().u();
 
-      model.difference(
-          eigen::as_mut_view(df.topRows(nv)),
-          eigen::as_const_view(xu.x_next().topRows(nq)),
-          eigen::as_const_view(f1.topRows(nq)));
+      vec_t x_h = x.eval();
+      vec_t u_h = u.eval();
 
-      vec_t dxx = vec_t::Zero(nv + nv);
-      vec_t dux = vec_t::Zero(nv + nv);
-      vec_t duu = vec_t::Zero(nv + nv);
+      vec_t dx = eps_x * vec_t::Random(nv + nv);
+      vec_t du = eps_u * vec_t::Random(nv);
 
-      for (index_t k = 0; k < nv + nv; ++k) {
-        for (index_t i = 0; i < nv + nv; ++i) {
-          for (index_t j = 0; j < nv + nv; ++j) {
-            dxx[k] += f.xx(k, i, j) * dx[i] * dx[j];
-          }
-        }
-        for (index_t i = 0; i < nv; ++i) {
-          for (index_t j = 0; j < nv; ++j) {
-            duu[k] += f.uu(k, i, j) * du[i] * du[j];
-          }
-        }
-        for (index_t i = 0; i < nv; ++i) {
-          for (index_t j = 0; j < nv + nv; ++j) {
-            dux[k] += f.ux(k, i, j) * du[i] * dx[j];
-          }
-        }
+      // set up u + du, x + dx
+      {
+        x_h.bottomRows(nv) += dx.bottomRows(nv);
+        model.integrate( //
+            eigen::as_mut_view(x_h.topRows(nq)),
+            eigen::as_const_view(x.topRows(nq)),
+            eigen::as_const_view(dx.topRows(nv)));
+        u_h += du;
       }
 
-      fmt::print("{}\n", df.transpose());
-      fmt::print("{}\n", (df - f.x * dx - f.u * du).transpose());
-      fmt::print("{}\n", (df - f.x * dx - f.u * du - dxx / 2 - duu / 2 - dux).transpose());
-    }
-    {
-      auto ne = eq.val.rows();
-      vec_t eq1{ne};
-      prob.eval_eq_to(eigen::as_mut_view(eq1), t, eigen::as_const_view(x_h), eigen::as_const_view(u_h));
+      auto print_norm_vec = [](auto const& v) { fmt::print("{} | {}\n", v.norm(), v.transpose()); };
+      {
+        vec_t f1{nq + nv};
+        prob.eval_f_to(eigen::as_mut_view(f1), t, eigen::as_const_view(x_h), eigen::as_const_view(u_h));
 
-      vec_t deq{ne};
+        vec_t df{nv + nv};
 
-      deq = eq1 - eq.val;
+        df.bottomRows(nv) = (f1 - xu.x_next()).bottomRows(nv);
 
-      vec_t dxx = vec_t::Zero(ne);
-      vec_t dux = vec_t::Zero(ne);
-      vec_t duu = vec_t::Zero(ne);
+        model.difference(
+            eigen::as_mut_view(df.topRows(nv)),
+            eigen::as_const_view(xu.x_next().topRows(nq)),
+            eigen::as_const_view(f1.topRows(nq)));
 
-      for (index_t k = 0; k < ne; ++k) {
-        for (index_t i = 0; i < nv + nv; ++i) {
-          for (index_t j = 0; j < nv + nv; ++j) {
-            dxx[k] += eq.xx(k, i, j) * dx[i] * dx[j];
+        vec_t dxx = vec_t::Zero(nv + nv);
+        vec_t dux = vec_t::Zero(nv + nv);
+        vec_t duu = vec_t::Zero(nv + nv);
+
+        for (index_t k = 0; k < nv + nv; ++k) {
+          for (index_t i = 0; i < nv + nv; ++i) {
+            for (index_t j = 0; j < nv + nv; ++j) {
+              dxx[k] += f.xx(k, i, j) * dx[i] * dx[j];
+            }
+          }
+          for (index_t i = 0; i < nv; ++i) {
+            for (index_t j = 0; j < nv; ++j) {
+              duu[k] += f.uu(k, i, j) * du[i] * du[j];
+            }
+          }
+          for (index_t i = 0; i < nv; ++i) {
+            for (index_t j = 0; j < nv + nv; ++j) {
+              dux[k] += f.ux(k, i, j) * du[i] * dx[j];
+            }
           }
         }
-        for (index_t i = 0; i < nv; ++i) {
-          for (index_t j = 0; j < nv; ++j) {
-            duu[k] += eq.uu(k, i, j) * du[i] * du[j];
-          }
-        }
-        for (index_t i = 0; i < nv; ++i) {
-          for (index_t j = 0; j < nv + nv; ++j) {
-            dux[k] += eq.ux(k, i, j) * du[i] * dx[j];
-          }
-        }
+
+        fmt::print("{}\n", df.transpose());
+        fmt::print("{}\n", (df - f.x * dx - f.u * du).transpose());
+        fmt::print("{}\n", (df - f.x * dx - f.u * du - dxx / 2 - duu / 2 - dux).transpose());
       }
 
-      fmt::print("{}\n", deq.transpose());
-      fmt::print("{}\n", (deq - eq.x * dx - eq.u * du).transpose());
-      fmt::print("{}\n", (deq - eq.x * dx - eq.u * du - dxx / 2 - duu / 2 - dux).transpose());
-    }
+      {
+        auto ne = eq.val.rows();
+        vec_t eq1{ne};
+        prob.eval_eq_to(eigen::as_mut_view(eq1), t, eigen::as_const_view(x_h), eigen::as_const_view(u_h));
 
-    fmt::print("\n");
+        vec_t deq{ne};
+
+        deq = eq1 - eq.val;
+
+        vec_t dxx = vec_t::Zero(ne);
+        vec_t dux = vec_t::Zero(ne);
+        vec_t duu = vec_t::Zero(ne);
+
+        for (index_t k = 0; k < ne; ++k) {
+          for (index_t i = 0; i < nv + nv; ++i) {
+            for (index_t j = 0; j < nv + nv; ++j) {
+              dxx[k] += eq.xx(k, i, j) * dx[i] * dx[j];
+            }
+          }
+          for (index_t i = 0; i < nv; ++i) {
+            for (index_t j = 0; j < nv; ++j) {
+              duu[k] += eq.uu(k, i, j) * du[i] * du[j];
+            }
+          }
+          for (index_t i = 0; i < nv; ++i) {
+            for (index_t j = 0; j < nv + nv; ++j) {
+              dux[k] += eq.ux(k, i, j) * du[i] * dx[j];
+            }
+          }
+        }
+
+        print_norm_vec(deq);
+        print_norm_vec(deq - eq.x * dx - eq.u * du);
+        print_norm_vec(deq - eq.x * dx - eq.u * du - dxx / 2 - duu / 2 - dux);
+      }
+
+      {
+        auto ne = eq2.val.rows();
+        vec_t eq1{ne};
+        prob.eval_eq_to(eigen::as_mut_view(eq1), t, eigen::as_const_view(x_h), eigen::as_const_view(u_h));
+
+        vec_t deq{ne};
+
+        deq = eq1 - eq2.val;
+
+        vec_t dxx = vec_t::Zero(ne);
+        vec_t dux = vec_t::Zero(ne);
+        vec_t duu = vec_t::Zero(ne);
+
+        for (index_t k = 0; k < ne; ++k) {
+          for (index_t i = 0; i < nv + nv; ++i) {
+            for (index_t j = 0; j < nv + nv; ++j) {
+              dxx[k] += eq2.xx(k, i, j) * dx[i] * dx[j];
+            }
+          }
+          for (index_t i = 0; i < nv; ++i) {
+            for (index_t j = 0; j < nv; ++j) {
+              duu[k] += eq2.uu(k, i, j) * du[i] * du[j];
+            }
+          }
+          for (index_t i = 0; i < nv; ++i) {
+            for (index_t j = 0; j < nv + nv; ++j) {
+              dux[k] += eq2.ux(k, i, j) * du[i] * dx[j];
+            }
+          }
+        }
+
+        print_norm_vec(deq);
+        print_norm_vec(deq - eq2.x * dx - eq2.u * du);
+        print_norm_vec(deq - eq2.x * dx - eq2.u * du - dxx / 2 - duu / 2 - dux);
+      }
+
+      fmt::print("\n");
+    }
   }
 
-  // auto res = solver.backward_pass<M>(traj, mults, 0.0, 1.0, d);
+  {
+    constexpr auto M = method::primal_dual_affine_multipliers;
+
+    auto derivs = solver.uninit_derivative_storage();
+    scalar_t mu = 1e30;
+    scalar_t reg = 0;
+    auto traj = solver.make_trajectory(control_generator_t{u_idx});
+    auto new_traj = traj.clone();
+    auto mults = solver.zero_multipliers<M>();
+
+    prob.compute_derivatives(derivs, traj);
+    auto bres = solver.backward_pass<M>(traj, mults, 0.0, 1.0, derivs);
+
+    mu = bres.mu;
+    reg = bres.reg;
+    for (auto fb : bres.feedback) {
+      fmt::print("val: {}\n", fb.val().transpose());
+      fmt::print("jac:\n{}\n\n", fb.val().transpose());
+    }
+
+    auto fres = solver.forward_pass<M>(new_traj, traj, mults, bres, true);
+
+    traj = new_traj.clone();
+
+    for (auto xu : traj) {
+      fmt::print("x: {}\nu: {}\n", xu.x().transpose(), xu.u().transpose());
+      std::fflush(stdout);
+    }
+
+    for (index_t t = 0; t < 10; ++t) {
+      solver.update_derivatives<M>(derivs, bres.feedback, mults, traj, mu);
+
+      bres = solver.backward_pass<M>(traj, mults, reg, mu, derivs);
+      mu = bres.mu;
+      reg = bres.reg;
+      fmt::print("mu: {:20}   reg: {:20}\n", mu, reg);
+
+      fres = solver.forward_pass<M>(new_traj, traj, mults, bres, true);
+
+      traj = new_traj.clone();
+      for (auto eq : derivs.eq()) {
+        fmt::print("eq: {}\n", eq.val.transpose());
+        std::fflush(stdout);
+      }
+    }
+  }
 }

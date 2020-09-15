@@ -612,6 +612,24 @@ struct ddp_solver_t {
     return e;
   }
 
+  template <method M>
+  void update_derivatives(
+      derivative_storage_t& derivatives,
+      control_feedback_t& fb_seq,
+      typename multiplier_sequence<M>::type& mults,
+      trajectory_t const& traj,
+      scalar_t const& mu) const {
+    prob.compute_derivatives(derivatives, traj);
+    mults.eq.update_origin(traj.m_state_data);
+    fb_seq.update_origin(traj.m_state_data);
+
+    for (auto zipped : ranges::zip(mults.eq, derivatives.eq(), fb_seq)) {
+      DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
+      p_eq.val() += mu * (eq.val + eq.u * fb.val());
+      p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
+    }
+  }
+
   using dyn_vec_t = Eigen::Matrix<scalar_t, Eigen::Dynamic, 1>;
   template <typename Mults>
   void cost_seq_aug(                      //
@@ -621,31 +639,31 @@ struct ddp_solver_t {
       scalar_t const& mu                  //
   ) const {
 
-    eigen::matrix_from_idx_t<scalar_t, eq_indexer_t> ce_storage(eq_idx.max_rows());
-    eigen::matrix_from_idx_t<scalar_t, eq_indexer_t> pe_storage(eq_idx.max_rows());
+    eigen::matrix_from_idx_t<scalar_t, eq_indexer_t> ce_storage(eq_idx.max_rows().value());
+    eigen::matrix_from_idx_t<scalar_t, eq_indexer_t> pe_storage(eq_idx.max_rows().value());
 
     for (auto zipped : ranges::zip(traj, mults.eq)) {
       DDP_BIND(auto const&, (xu, p_eq), zipped);
-      index_t t = xu.time_idx();
+      index_t t = xu.current_index();
 
       auto const x = xu.x();
       auto const u = xu.u();
 
-      auto ce = eigen::as_mut_view(ce_storage.                                              //
-                                   template topRows<                                        //
-                                       eigen::type_to_size<typename eq_indexer_t::row_kind> //
-                                       >(eq_idx.rows(t)));
+      auto ce = eigen::as_mut_view(ce_storage.                                       //
+                                   template topRows<                                 //
+                                       eq_indexer_t::row_kind::value_at_compile_time //
+                                       >(eq_idx.rows(t).value()));
 
-      auto pe = eigen::as_mut_view(pe_storage.                                              //
-                                   template topRows<                                        //
-                                       eigen::type_to_size<typename eq_indexer_t::row_kind> //
-                                       >(eq_idx.rows(t)));
+      auto pe = eigen::as_mut_view(pe_storage.                                       //
+                                   template topRows<                                 //
+                                       eq_indexer_t::row_kind::value_at_compile_time //
+                                       >(eq_idx.rows(t).value()));
 
       auto const l = prob.l(t, x, u);
       prob.eval_eq_to(ce, t, x, u); // ce = eq(t,x,u)
       p_eq(pe, x);                  // pe = p_eq(t, x, u)
 
-      out_costs(t) = l + pe.dot(ce) + (mu / 2) * ce.squaredNorm();
+      out_costs(t - this->index_begin()) = l + pe.dot(ce) + (mu / 2) * ce.squaredNorm();
     }
     auto const x = traj.x_f();
     out_costs(this->index_end() - this->index_begin()) = prob.lf(x);
@@ -674,15 +692,15 @@ struct ddp_solver_t {
   template <method M>
   auto backward_pass(
       trajectory_t const&                             current_traj,
-      typename multiplier_sequence<M>::type&    mults,
+      typename multiplier_sequence<M>::type const&    mults,
       scalar_t                                        regularization,
       scalar_t                                        mu,
-      derivative_storage_t&                           derivatives
+      derivative_storage_t const&                     derivatives
   ) const -> backward_pass_result_t<M>;
 
   template <method M>
   auto forward_pass(
-      trajectory_t     &&                             new_traj_storage,
+      trajectory_t&                                   new_traj_storage,
       trajectory_t const&                             reference_traj,
       typename multiplier_sequence<M>::type const&    old_mults,
       backward_pass_result_t<M> const&                backward_pass_result,

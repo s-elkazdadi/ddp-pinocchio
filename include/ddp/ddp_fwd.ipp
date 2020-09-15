@@ -10,7 +10,7 @@ template <typename Problem>
 template <method M>
 auto ddp_solver_t<Problem>::
   forward_pass(
-      trajectory_t &&                                 new_traj_storage,
+      trajectory_t&                                   new_traj_storage,
       trajectory_t const&                             reference_traj,
       typename multiplier_sequence<M>::type const&    old_mults,
       backward_pass_result_t<M> const&                backward_pass_result,
@@ -21,8 +21,8 @@ auto ddp_solver_t<Problem>::
   dyn_vec_t costs_old_traj;
   dyn_vec_t costs_new_traj;
   if (do_linesearch) {
-    costs_old_traj.resize(index_end() - index_begin());
-    costs_new_traj.resize(index_end() - index_begin());
+    costs_old_traj.resize(index_end() - index_begin() + 1);
+    costs_new_traj.resize(index_end() - index_begin() + 1);
     cost_seq_aug(eigen::as_mut_view(costs_old_traj), reference_traj, old_mults, backward_pass_result.mu);
   }
 
@@ -33,9 +33,8 @@ auto ddp_solver_t<Problem>::
       break;
     }
 
-    for (auto zipped :
-         ddp::ranges::zip(new_traj_storage, reference_traj, old_mults.eq, backward_pass_result.feedback)) {
-      DDP_BIND(auto&&, (xu_new, xu_old, p_eq, fb), zipped);
+    for (auto zipped : ddp::ranges::zip(new_traj_storage, reference_traj, backward_pass_result.feedback)) {
+      DDP_BIND(auto&&, (xu_new, xu_old, fb), zipped);
       index_t t = xu_new.current_index();
 
       xu_new.u() = xu_old.u() + step * fb.val();

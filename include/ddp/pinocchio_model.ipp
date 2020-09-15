@@ -328,6 +328,8 @@ void model_t<T, Nq, Nv>::integrate(
   validate_config_vector(eigen::as_const_view(out_q), "output configuration vector");
   validate_config_vector(q, "configuration vector");
   validate_tangent_vector(v, "tangent vector");
+  DDP_ASSERT(not q.hasNaN(), "invalid data");
+  DDP_ASSERT(not v.hasNaN(), "invalid data");
   ::pinocchio::integrate(m_model->m_impl, q, v, out_q);
 }
 
@@ -340,6 +342,8 @@ void model_t<T, Nq, Nv>::d_integrate_dq(
   validate_tangent_matrix(eigen::as_const_view(out_q_dq), "output jacobian matrix");
   validate_config_vector(q, "configuration vector");
   validate_tangent_vector(v, "tangent vector");
+  DDP_ASSERT(not q.hasNaN(), "invalid data");
+  DDP_ASSERT(not v.hasNaN(), "invalid data");
   ::pinocchio::dIntegrate(m_model->m_impl, q, v, out_q_dq, ::pinocchio::ArgumentPosition::ARG0);
 }
 
@@ -352,6 +356,8 @@ void model_t<T, Nq, Nv>::d_integrate_dv(
   validate_tangent_matrix(eigen::as_const_view(out_q_dv), "output jacobian");
   validate_config_vector(q, "configuration vector");
   validate_tangent_vector(v, "tangent vector");
+  DDP_ASSERT(not q.hasNaN(), "invalid data");
+  DDP_ASSERT(not v.hasNaN(), "invalid data");
   ::pinocchio::dIntegrate(m_model->m_impl, q, v, out_q_dv, ::pinocchio::ArgumentPosition::ARG1);
 }
 
@@ -367,6 +373,8 @@ void model_t<T, Nq, Nv>::d_integrate_transport_dq_or_dv(
   validate_similar_jac_matrices(eigen::as_const_view(out_J), in_J, "output jacobian", "input jacobian");
   validate_config_vector(q, "configuration vector");
   validate_tangent_vector(v, "tangent vector");
+  DDP_ASSERT(not q.hasNaN(), "invalid data");
+  DDP_ASSERT(not v.hasNaN(), "invalid data");
 
   auto arg = dq ? ::pinocchio::ArgumentPosition::ARG0 : ::pinocchio::ArgumentPosition::ARG1;
   if (in_J.data() == out_J.data()) {
@@ -427,6 +435,8 @@ void model_t<T, Nq, Nv>::difference(
   validate_tangent_vector(eigen::as_const_view(out_v), "output tangent vector");
   validate_config_vector(q_start, "starting configuration vector");
   validate_config_vector(q_finish, "finish configuration vector");
+  DDP_ASSERT(not q_start.hasNaN(), "invalid data");
+  DDP_ASSERT(not q_finish.hasNaN(), "invalid data");
 
   ::pinocchio::difference(m_model->m_impl, q_start, q_finish, out_v);
 }
@@ -440,6 +450,8 @@ void model_t<T, Nq, Nv>::d_difference_dq_start(
   validate_tangent_matrix(eigen::as_const_view(out_v_dq_start), "output jacobian");
   validate_config_vector(q_start, "starting configuration vector");
   validate_config_vector(q_finish, "finish configuration vector");
+  DDP_ASSERT(not q_start.hasNaN(), "invalid data");
+  DDP_ASSERT(not q_finish.hasNaN(), "invalid data");
 
   ::pinocchio::dDifference(m_model->m_impl, q_start, q_finish, out_v_dq_start, ::pinocchio::ArgumentPosition::ARG0);
 }
@@ -453,6 +465,8 @@ void model_t<T, Nq, Nv>::d_difference_dq_finish(
   validate_tangent_matrix(eigen::as_const_view(out_v_dq_finish), "output jacobian");
   validate_config_vector(q_start, "starting configuration vector");
   validate_config_vector(q_finish, "finish configuration vector");
+  DDP_ASSERT(not q_start.hasNaN(), "invalid data");
+  DDP_ASSERT(not q_finish.hasNaN(), "invalid data");
 
   ::pinocchio::dDifference(m_model->m_impl, q_start, q_finish, out_v_dq_finish, ::pinocchio::ArgumentPosition::ARG1);
 }
@@ -468,6 +482,9 @@ void model_t<T, Nq, Nv>::dynamics_aba( //
   validate_config_vector(q, "configuration vector");
   validate_tangent_vector(v, "velocity vector");
   validate_tangent_vector(tau, "control vector");
+  DDP_ASSERT(not q.hasNaN(), "invalid data");
+  DDP_ASSERT(not v.hasNaN(), "invalid data");
+  DDP_ASSERT(not tau.hasNaN(), "invalid data");
 
   impl_data_t* data = this->get_data();
   ::pinocchio::aba(m_model->m_impl, data->m_impl, q, v, tau);
@@ -495,6 +512,9 @@ void model_t<T, Nq, Nv>::d_dynamics_aba(      //
   validate_config_vector(q, "configuration vector");
   validate_tangent_vector(v, "velocity vector");
   validate_tangent_vector(tau, "control vector");
+  DDP_ASSERT(not q.hasNaN(), "invalid data");
+  DDP_ASSERT(not v.hasNaN(), "invalid data");
+  DDP_ASSERT(not tau.hasNaN(), "invalid data");
 
   impl_data_t* data = this->get_data();
   ::pinocchio::computeABADerivatives(
@@ -519,6 +539,9 @@ void model_t<T, Nq, Nv>::inverse_dynamics_rnea( //
   validate_config_vector(q, "configuration vector");
   validate_tangent_vector(v, "velocity vector");
   validate_tangent_vector(a, "acceleration vector");
+  DDP_ASSERT(not q.hasNaN(), "invalid data");
+  DDP_ASSERT(not v.hasNaN(), "invalid data");
+  DDP_ASSERT(not a.hasNaN(), "invalid data");
 
   impl_data_t* data = this->get_data();
   ::pinocchio::rnea(m_model->m_impl, data->m_impl, q, v, a);

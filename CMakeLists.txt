@@ -41,7 +41,7 @@ endif()
 # Conan dependencies
 set(CONAN_REQUIRES
     # Boost Software License 1.0
-    boost/1.73.0
+    boost/1.74.0
     range-v3/0.11.0
     #
     # Apache License 2.0
@@ -50,8 +50,8 @@ set(CONAN_REQUIRES
     # MIT License
     doctest/2.4.0
     gsl-lite/0.37.0
-    fmt/7.0.2
-    spdlog/1.7.0
+    fmt/7.0.3
+    spdlog/1.8.0
     backward-cpp/1.5
     #
     # Mozilla Public License 2.0

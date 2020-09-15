@@ -226,6 +226,16 @@ struct tensor_view_t {
     }
   }
 
+  auto has_nan() const noexcept -> bool {
+    using std::isnan;
+    for (index_t i = 0; i < (m_outdim * m_indiml * m_indimr).value(); ++i) {
+      if (isnan(m_data[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   auto as_const_view() const noexcept -> tensor_view_t<value_type const, Out_Dim, In_DimL, In_DimR> {
     return {m_data, m_outdim, m_indiml, m_indimr};
   }

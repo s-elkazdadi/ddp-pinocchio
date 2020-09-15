@@ -96,14 +96,14 @@ public:
   friend auto begin(trajectory_t const& t) -> const_iterator {
     return {begin(t.m_state_data), begin(t.m_control_data)};
   }
-  friend auto end(trajectory_t& t) -> iterator { return {--(end(t.m_state_data)), end(t.m_control_data)}; }
-  friend auto end(trajectory_t const& t) -> const_iterator { return {--(end(t.m_state_data)), end(t.m_control_data)}; }
+  friend auto end(trajectory_t& t) -> iterator { return {--end(t.m_state_data), end(t.m_control_data)}; }
+  friend auto end(trajectory_t const& t) -> const_iterator { return {--end(t.m_state_data), end(t.m_control_data)}; }
 
   auto x_0() -> typename proxy_t<false>::x_proxy_t::value_type { return (*begin(*this)).x(); }
   auto x_0() const -> typename proxy_t<true>::x_proxy_t::value_type { return (*begin(*this)).x(); }
 
-  auto x_f() -> typename proxy_t<false>::x_proxy_t::value_type { return (*end(*this)).x(); }
-  auto x_f() const -> typename proxy_t<true>::x_proxy_t::value_type { return (*end(*this)).x(); }
+  auto x_f() -> typename proxy_t<false>::x_proxy_t::value_type { return (*--end(m_state_data)).get(); }
+  auto x_f() const -> typename proxy_t<true>::x_proxy_t::value_type { return (*--end(m_state_data)).get(); }
 };
 
 } // namespace trajectory

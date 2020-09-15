@@ -12,14 +12,12 @@ auto ddp_solver_t<Problem>::
     // clang-format off
   backward_pass(
       trajectory_t const&                             current_traj,
-      typename multiplier_sequence<M>::type&          mults_mut,
+      typename multiplier_sequence<M>::type const&    mults,
       scalar_t                                        regularization,
       scalar_t                                        mu,
-      derivative_storage_t&                           derivatives
+      derivative_storage_t const&                     derivatives
   ) const -> backward_pass_result_t<M>
 {
-  mults_mut.eq.update_origin(current_traj.m_state_data);
-  auto const& mults = mults_mut;
   // clang-format on
   bool success = false;
   auto ctrl_fb = control_feedback_t{u_idx, model};
@@ -51,6 +49,10 @@ auto ddp_solver_t<Problem>::
       auto const tmp = eigen::as_const_view(tmp_);
       auto const tmp2 = eigen::as_const_view(tmp2_);
       auto const v_x = eigen::as_const_view(V_x);
+
+      assert(isfinite(mu));
+      assert(not pe.hasNaN());
+      assert(not pe_x.hasNaN());
 
       // clang-format off
       auto Q_x         = l.x.transpose().eval();                  auto Q_x_v = eigen::as_mut_view(Q_x);
@@ -94,6 +96,7 @@ auto ddp_solver_t<Problem>::
         break;
       }
 
+      u_fb.origin() = xu.x();
       u_fb.val() = fact.solve(-Q_u);
       u_fb.jac() = fact.solve(-Q_ux);
 

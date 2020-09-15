@@ -148,10 +148,18 @@ public:
     void operator()(eigen::view_t<val_t> out, eigen::view_t<In const> input) const noexcept {
 
       // TODO: dynamic allocation?
-      In tmp1{origin().rows()};
-      m_model->difference(tmp1, origin(), input);
+      index_t nq = m_model->configuration_dim();
+      index_t nv = m_model->tangent_dim();
+      In tmp1{2 * nv};
+      m_model->difference(
+          eigen::as_mut_view(tmp1.topRows(nv)),
+          eigen::as_const_view(origin().topRows(nq)),
+          eigen::as_const_view(input.topRows(nq)));
+
+      tmp1.bottomRows(nv) = origin().bottomRows(nv) - input.bottomRows(nv);
+
       out = val();
-      out.noalias() += jac() * input;
+      out.noalias() += jac() * tmp1;
     }
   };
 
