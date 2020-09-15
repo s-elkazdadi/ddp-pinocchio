@@ -1265,13 +1265,13 @@ auto main() -> int {
     auto bres = solver.backward_pass<M>(traj, mults, reg, mu, derivs);
 
     mu = bres.mu;
-    reg = bres.reg;
+    // reg = bres.reg;
     for (auto fb : bres.feedback) {
       fmt::print("val: {}\n", fb.val().transpose());
       fmt::print("jac:\n{}\n\n", fb.val().transpose());
     }
 
-    auto fres = solver.forward_pass<M>(new_traj, traj, mults, bres, true);
+    auto step = solver.forward_pass<M>(new_traj, traj, mults, bres, true);
 
     traj = new_traj.clone();
 
@@ -1281,17 +1281,20 @@ auto main() -> int {
     }
 
     for (index_t t = 0; t < 10; ++t) {
-      solver.update_derivatives<M>(derivs, bres.feedback, mults, traj, mu);
+      solver.update_derivatives<M>(derivs, bres.feedback, mults, traj, mu, true);
 
       bres = solver.backward_pass<M>(traj, mults, reg, mu, derivs);
       mu = bres.mu;
-      reg = bres.reg;
+      // reg = bres.reg;
       fmt::print("mu: {:20}   reg: {:20}\n", mu, reg);
 
-      fres = solver.forward_pass<M>(new_traj, traj, mults, bres, true);
+      step = solver.forward_pass<M>(new_traj, traj, mults, bres, true);
+      if (step >= 0.5) {
+        // reg /= 2;
+      }
 
       traj = new_traj.clone();
-      fmt::print("step: {}\n", fres);
+      fmt::print("step: {}\n", step);
       for (auto eq : derivs.eq()) {
         fmt::print("eq: {}\n", eq.val.transpose());
         std::fflush(stdout);

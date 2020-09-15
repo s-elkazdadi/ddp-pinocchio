@@ -90,8 +90,8 @@ auto ddp_solver_t<Problem>::
 
       auto const fact = ((Q_uu + regularization * I_u).eval()).llt();
       if (fact.info() == Eigen::NumericalIssue) {
-        if (regularization == 0) {
-          regularization = 1.0;
+        if (regularization < mu) {
+          regularization = mu;
         }
         mu *= 2;
         regularization *= 2;

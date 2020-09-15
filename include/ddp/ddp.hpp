@@ -618,15 +618,18 @@ struct ddp_solver_t {
       control_feedback_t& fb_seq,
       typename multiplier_sequence<M>::type& mults,
       trajectory_t const& traj,
-      scalar_t const& mu) const {
+      scalar_t const& mu,
+      bool update_origin_only) const {
     prob.compute_derivatives(derivatives, traj);
     mults.eq.update_origin(traj.m_state_data);
     fb_seq.update_origin(traj.m_state_data);
 
-    for (auto zipped : ranges::zip(mults.eq, derivatives.eq(), fb_seq)) {
-      DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
-      p_eq.val() += mu * (eq.val + eq.u * fb.val());
-      p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
+    if (not update_origin_only) {
+      for (auto zipped : ranges::zip(mults.eq, derivatives.eq(), fb_seq)) {
+        DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
+        p_eq.val() += mu * (eq.val + eq.u * fb.val());
+        p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
+      }
     }
   }
 
