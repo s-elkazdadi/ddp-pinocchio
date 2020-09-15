@@ -21,7 +21,27 @@ using scalar_t = double;
 
 using namespace ddp;
 
+namespace gsl {
+template <typename T>
+using owner = T;
+} // namespace gsl
+
+struct file_t {
+  gsl::owner<std::FILE*> ptr;
+  file_t(file_t const&) = delete;
+  file_t(file_t&&) = delete;
+  auto operator=(file_t const&) -> file_t& = delete;
+  auto operator=(file_t &&) -> file_t& = delete;
+  file_t(char const* file, char const* mode) noexcept : ptr{std::fopen(file, mode)} {
+    if (ptr == nullptr) {
+      std::terminate();
+    }
+  }
+  ~file_t() { std::fclose(ptr); }
+};
+
 struct chronometer_t {
+  static file_t const file;
   using clock_t = std::chrono::steady_clock;
   clock_t::time_point m_begin;
   clock_t::time_point m_end;
@@ -29,15 +49,20 @@ struct chronometer_t {
 
   chronometer_t(chronometer_t const&) = delete;
   chronometer_t(chronometer_t&&) = delete;
-  auto operator&(chronometer_t const&) -> chronometer_t& = delete;
-  auto operator&(chronometer_t &&) -> chronometer_t& = delete;
+  auto operator=(chronometer_t const&) -> chronometer_t& = delete;
+  auto operator=(chronometer_t &&) -> chronometer_t& = delete;
 
-  explicit chronometer_t(char const* message) : m_begin{clock_t::now()}, m_message{message} {}
+  explicit chronometer_t(char const* message) : m_begin{}, m_message{message} { m_begin = clock_t::now(); }
   ~chronometer_t() {
     m_end = clock_t::now();
-    fmt::print("finished: {} | {} elapsed\n", m_message, std::chrono::duration<double, std::milli>(m_end - m_begin));
+    fmt::print(
+        file.ptr,
+        "finished: {} | {} elapsed\n",
+        m_message,
+        std::chrono::duration<double, std::milli>(m_end - m_begin));
   }
 };
+file_t const chronometer_t::file = {"/tmp/chrono.log", "w"};
 
 template <typename Out, typename XX, typename UX, typename UU, typename DX, typename DU>
 void add_second_order_term(Out&& out, XX const& xx, UX const& ux, UU const& uu, DX const& dx, DU const& du) {
@@ -446,6 +471,7 @@ struct problem_t {
       x_const x,                    //
       u_const u                     //
   ) const {
+    (void)t;
     index_t nq = m_model.configuration_dim();
     index_t nv = m_model.tangent_dim();
 
@@ -493,13 +519,9 @@ struct problem_t {
     index_t nv = m_model.tangent_dim();
     index_t ne = eq_val.rows();
 
-    auto q = eigen::as_const_view(x.topRows(nq));
-    auto v = eigen::as_const_view(x.bottomRows(nv));
-
     compute_eq_derivatives_first(eq_x, eq_u, eq_val, t, x, u);
     // compute second derivatives
     {
-      auto eq = eigen::as_const_view(eq_val);
 
       mat_t eq_x_{ne, nv + nv};
       mat_t eq_u_{ne, nv};
@@ -583,12 +605,10 @@ struct problem_t {
       u_const u,                //
       x_const x_next            //
   ) const {
+    (void)x_next;
 
     index_t nq = m_model.configuration_dim();
     index_t nv = m_model.tangent_dim();
-
-    auto q = eigen::as_const_view(x.topRows(nq));
-    auto v = eigen::as_const_view(x.bottomRows(nv));
 
     compute_f_derivatives_first(fx, fu, t, x, u);
     // compute second derivatives
@@ -1252,10 +1272,16 @@ auto main() -> int {
   }
 
   {
+    using std::pow;
+
     constexpr auto M = method::primal_dual_affine_multipliers;
 
     auto derivs = solver.uninit_derivative_storage();
-    scalar_t mu = 1e30;
+
+    scalar_t const mu_init = 1e20;
+    scalar_t mu = mu_init;
+    scalar_t w = 1 / mu_init;
+    scalar_t n = 1 / pow(mu_init, static_cast<scalar_t>(0.1L));
     scalar_t reg = 0;
     auto traj = solver.make_trajectory(control_generator_t{u_idx});
     auto new_traj = traj.clone();
@@ -1277,11 +1303,21 @@ auto main() -> int {
 
     for (auto xu : traj) {
       fmt::print("x: {}\nu: {}\n", xu.x().transpose(), xu.u().transpose());
-      std::fflush(stdout);
     }
 
-    for (index_t t = 0; t < 10; ++t) {
-      solver.update_derivatives<M>(derivs, bres.feedback, mults, traj, mu, true);
+    for (index_t t = 0; t < 50; ++t) {
+      auto mult_update_rv = solver.update_derivatives<M>(derivs, bres.feedback, mults, traj, mu, w, n);
+      switch (mult_update_rv) {
+      case mult_update_attempt_result_e::no_update:
+        break;
+      case mult_update_attempt_result_e::update_failure:
+        mu *= 10;
+        break;
+      case mult_update_attempt_result_e::update_success:
+        n /= pow(mu, static_cast<scalar_t>(0.9L));
+        w /= mu;
+        fmt::print("updated multipliers\n");
+      }
 
       bres = solver.backward_pass<M>(traj, mults, reg, mu, derivs);
       mu = bres.mu;
@@ -1295,10 +1331,11 @@ auto main() -> int {
 
       traj = new_traj.clone();
       fmt::print("step: {}\n", step);
+      fmt::print("eq: ");
       for (auto eq : derivs.eq()) {
-        fmt::print("eq: {}\n", eq.val.transpose());
-        std::fflush(stdout);
+        fmt::print("{} ", eq.val.norm());
       }
+      fmt::print("\n");
     }
   }
 }

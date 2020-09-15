@@ -26,6 +26,7 @@ auto ddp_solver_t<Problem>::
   while (not success) {
     auto V_xx = derivatives.lfxx.eval();
     auto V_x = derivatives.lfx.transpose().eval();
+    auto const v_x = eigen::as_const_view(V_x);
 
     for (auto zipped :    //
          ranges::reverse( //
@@ -47,7 +48,6 @@ auto ddp_solver_t<Problem>::
 
       auto const tmp = eigen::as_const_view(tmp_);
       auto const tmp2 = eigen::as_const_view(tmp2_);
-      auto const v_x = eigen::as_const_view(V_x);
 
       {
         using std::isfinite;
@@ -116,8 +116,6 @@ auto ddp_solver_t<Problem>::
       V_xx            = Q_xx;
       V_xx.noalias() += Q_ux.transpose() * K;
       // clang-format on
-
-      fmt::print("feedback norm: {}\n", k.norm());
 
       if (t == 0) {
         success = true;

@@ -8,6 +8,12 @@
 
 namespace ddp {
 
+enum struct mult_update_attempt_result_e {
+  no_update,
+  update_success,
+  update_failure,
+};
+
 enum struct method {
   primal,
   primal_dual_constant_multipliers,
@@ -521,11 +527,8 @@ struct ddp_solver_t {
   }
 
   template <typename Mult_Seq>
-  auto optimality_lag(
-      trajectory_t const& reference_traj,
-      trajectory_t const& traj,
-      Mult_Seq const& mults,
-      derivative_storage_t const& derivs) const -> scalar_t {
+  auto optimality_lag(trajectory_t const& traj, Mult_Seq const& mults, derivative_storage_t const& derivs) const
+      -> scalar_t {
 
     namespace rng = ddp::ranges;
     using std::max;
@@ -533,69 +536,112 @@ struct ddp_solver_t {
     scalar_t retval = 0;
     auto adj = derivs.lfx;
 
+    eigen::matrix_from_idx_t<scalar_t, eq_indexer_t> pe_storage(eq_idx.max_rows().value());
+    eigen::matrix_from_idx_t<scalar_t, control_indexer_t> lu_storage(u_idx.max_rows().value());
+
     for (auto zipped : //
          rng::reverse( //
              rng::zip( //
-                 reference_traj,
                  traj,
                  mults.eq,
                  derivs.l(),
                  derivs.f(),
                  derivs.eq()))) {
-      DDP_BIND(auto const&, (xu_ref, xu, p_eq_, l, f, eq), zipped);
+      DDP_BIND(auto const&, (xu, p_eq, l, f, eq), zipped);
 
-      auto p_eq = p_eq_(xu.x(), xu_ref.x()).eval();
+      index_t t = xu.current_index();
 
-      auto tmp = l.u.eval();
-      tmp.noalias() += p_eq.transpose() * eq.u;
-      tmp.noalias() += adj * f.u;
+      auto pe = eigen::as_mut_view(pe_storage.                                       //
+                                   template topRows<                                 //
+                                       eq_indexer_t::row_kind::value_at_compile_time //
+                                       >(eq_idx.rows(t).value()));
 
-      retval = max(retval, tmp.stableNorm());
+      auto lu = eigen::as_mut_view(lu_storage.                                            //
+                                   template topRows<                                      //
+                                       control_indexer_t::row_kind::value_at_compile_time //
+                                       >(u_idx.rows(t).value()));
+
+      p_eq(pe, xu.x());
+
+      lu = l.u;
+      lu.noalias() += pe.transpose() * eq.u;
+      lu.noalias() += adj * f.u;
+
+      retval = max(retval, lu.stableNorm());
 
       adj = l.x + (adj * f.x).eval();
-      adj.noalias() += p_eq.transpose() * eq.x;
-      adj.noalias() += eq.val.transpose() * p_eq_.jac();
+      adj.noalias() += pe.transpose() * eq.x;
+      adj.noalias() += eq.val.transpose() * p_eq.jac();
     }
     return retval;
   }
 
   template <typename Mult_Seq>
   auto optimality_obj(
-      trajectory_t const& reference_traj,
-      trajectory_t const& traj,
-      Mult_Seq const& mults,
-      scalar_t const& mu,
-      derivative_storage_t const& derivs) const -> scalar_t {
+      trajectory_t const& traj, Mult_Seq const& mults, scalar_t const& mu, derivative_storage_t const& derivs) const
+      -> scalar_t {
 
     namespace rng = ddp::ranges;
     using std::max;
 
     scalar_t retval = 0;
     auto adj = derivs.lfx;
+    // fmt::print("adjoint: {}\n", adj);
+
+    eigen::matrix_from_idx_t<scalar_t, eq_indexer_t> pe_storage(eq_idx.max_rows().value());
+    eigen::matrix_from_idx_t<scalar_t, control_indexer_t> lu_storage(u_idx.max_rows().value());
 
     for (auto zipped : //
          rng::reverse( //
              rng::zip( //
-                 reference_traj,
                  traj,
                  mults.eq,
                  derivs.l(),
                  derivs.f(),
                  derivs.eq()))) {
-      DDP_BIND(auto const&, (xu_ref, xu, p_eq_, p_ineq_, l, f, eq), zipped);
-      auto p_eq = p_eq_(xu.x(), xu_ref.x()).eval();
+      DDP_BIND(auto const&, (xu, p_eq, l, f, eq), zipped);
+      index_t t = xu.current_index();
 
-      auto tmp = l.u.eval();
-      auto tmp2 = (p_eq + mu * eq.val).eval();
-      tmp.noalias() += tmp2.transpose() * eq.u;
-      tmp.noalias() += adj * f.u;
+      auto pe = eigen::as_mut_view(pe_storage.                                       //
+                                   template topRows<                                 //
+                                       eq_indexer_t::row_kind::value_at_compile_time //
+                                       >(eq_idx.rows(t).value()));
 
-      retval = max(retval, tmp.stableNorm());
+      auto lu = eigen::as_mut_view(lu_storage.                                            //
+                                   template topRows<                                      //
+                                       control_indexer_t::row_kind::value_at_compile_time //
+                                       >(u_idx.rows(t).value()));
 
-      adj = l.x + (adj * f.x).eval();
-      adj += adj * f.x;
-      adj.noalias() += tmp2 * eq.x;
-      adj.noalias() += eq.val.transpose() * p_eq_.jac();
+      p_eq(pe, xu.x());
+
+      lu = l.u;
+      lu.noalias() += pe.transpose() * eq.u;
+      lu.noalias() += mu * eq.val.transpose() * eq.u;
+      lu.noalias() += adj * f.u;
+
+      retval = max(retval, lu.stableNorm());
+
+      // fmt::print(
+      //     "{}\n",
+      //     l.x                                  //
+      //         + adj * f.x                      //
+      //         + mu * eq.val.transpose() * eq.x //
+      //         + pe.transpose() * eq.x          //
+      //         + eq.val.transpose() * p_eq.jac());
+
+      adj = (l.x                              //
+             + adj * f.x                      //
+             + mu * eq.val.transpose() * eq.x //
+             + pe.transpose() * eq.x          //
+             + eq.val.transpose() * p_eq.jac())
+                .eval();
+      // adj = l.x;
+      // adj += (adj * f.x).eval();
+      // adj.noalias() += mu * eq.val.transpose() * eq.x;
+      // adj.noalias() += pe.transpose() * eq.x;
+      // adj.noalias() += eq.val.transpose() * p_eq.jac();
+
+      // fmt::print("adjoint: {}\n", adj);
     }
     return retval;
   }
@@ -613,23 +659,41 @@ struct ddp_solver_t {
   }
 
   template <method M>
-  void update_derivatives(
+  auto update_derivatives(
       derivative_storage_t& derivatives,
       control_feedback_t& fb_seq,
       typename multiplier_sequence<M>::type& mults,
       trajectory_t const& traj,
       scalar_t const& mu,
-      bool update_origin_only) const {
+      scalar_t const& w,
+      scalar_t const& n) const -> mult_update_attempt_result_e {
     prob.compute_derivatives(derivatives, traj);
+
     mults.eq.update_origin(traj.m_state_data);
     fb_seq.update_origin(traj.m_state_data);
 
-    if (not update_origin_only) {
-      for (auto zipped : ranges::zip(mults.eq, derivatives.eq(), fb_seq)) {
-        DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
-        p_eq.val() += mu * (eq.val + eq.u * fb.val());
-        p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
+    auto opt_obj = optimality_obj(traj, mults, mu, derivatives);
+    auto opt_constr = optimality_constr(derivatives);
+
+    fmt::print(
+        "opt obj: {}\n"
+        "opt constr: {}\n",
+        opt_obj,
+        opt_constr);
+
+    if (opt_obj < w) {
+      if (opt_constr < n) {
+        for (auto zipped : ranges::zip(mults.eq, derivatives.eq(), fb_seq)) {
+          DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
+          p_eq.val() += mu * (eq.val + eq.u * fb.val());
+          p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
+        }
+        return mult_update_attempt_result_e::update_success;
+      } else {
+        return mult_update_attempt_result_e::update_failure;
       }
+    } else {
+      return mult_update_attempt_result_e::no_update;
     }
   }
 
@@ -716,7 +780,7 @@ struct ddp_solver_t {
   eq_indexer_t                            eq_idx;
   typename trajectory_t::x_vec_t const&   x_init;
   // clang-format on
-};
+}; // namespace ddp
 
 } // namespace ddp
 
