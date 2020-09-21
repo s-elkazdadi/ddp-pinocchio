@@ -54,6 +54,7 @@ auto ddp_solver_t<Problem>::
         assert(isfinite(mu));
         assert(not pe.hasNaN());
         assert(not pe_x.hasNaN());
+        assert(eq_mult.origin() == xu.x());
       }
 
       // clang-format off

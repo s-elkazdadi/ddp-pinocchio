@@ -685,6 +685,8 @@ struct ddp_solver_t {
       if (opt_constr < n) {
         for (auto zipped : ranges::zip(mults.eq, derivatives.eq(), fb_seq)) {
           DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
+
+          // TODO: line search
           p_eq.val() += mu * (eq.val + eq.u * fb.val());
           p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
         }

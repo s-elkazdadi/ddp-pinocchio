@@ -104,16 +104,17 @@ public:
     };
 
     for (auto zipped : ranges::zip(m_origin, m_val_data, m_jac_data, x_new_truncated_t{new_trajectory})) {
-      DDP_BIND(auto&&, (x, val, jac, x_new), zipped);
-      auto q_c = eigen::as_const_view(config_part(x.get()));
-      auto v_c = eigen::as_const_view(vel_part(x.get()));
+      DDP_BIND(auto&&, (origin, val, jac, x_new), zipped);
+
+      auto q_c = eigen::as_const_view(config_part(origin.get()));
+      auto v_c = eigen::as_const_view(vel_part(origin.get()));
 
       auto q_new_c = eigen::as_const_view(config_part(x_new.get()));
       auto v_new_c = eigen::as_const_view(vel_part(x_new.get()));
 
       auto tmp_storage = tmp_jac2.template topRows<jac_indexer_t::row_kind::value_at_compile_time>(jac.get().rows());
 
-      // tmp = x_new - x
+      // tmp = x_new - origin
       m_model->difference(tmp_q, q_c, q_new_c);
       tmp_v = v_new_c - v_c;
       m_model->d_difference_dq_finish(eigen::as_mut_view(tmp_jac), q_c, q_new_c);
@@ -125,7 +126,7 @@ public:
       val.get().noalias()   += jac_v * tmp_v;
       tmp_storage.noalias()  = jac_q * tmp_jac;
       jac_q                  = tmp_storage;
-      x.get()                = x_new.get();
+      origin.get()                = x_new.get();
       // clang-format on
     }
   }
@@ -156,7 +157,7 @@ public:
           eigen::as_const_view(origin().topRows(nq)),
           eigen::as_const_view(input.topRows(nq)));
 
-      tmp1.bottomRows(nv) = origin().bottomRows(nv) - input.bottomRows(nv);
+      tmp1.bottomRows(nv) = input.bottomRows(nv) - origin().bottomRows(nv);
 
       out = val();
       out.noalias() += jac() * tmp1;

@@ -36,6 +36,7 @@ struct file_t {
     if (ptr == nullptr) {
       std::terminate();
     }
+    std::setvbuf(ptr, nullptr, _IONBF, 0);
   }
   ~file_t() { std::fclose(ptr); }
 };
@@ -1069,6 +1070,7 @@ struct problem_t {
 };
 
 auto main() -> int {
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
 
   using vec_t = Eigen::Matrix<scalar_t, -1, 1>;
 
@@ -1278,7 +1280,7 @@ auto main() -> int {
 
     auto derivs = solver.uninit_derivative_storage();
 
-    scalar_t const mu_init = 1e20;
+    scalar_t const mu_init = 1e30;
     scalar_t mu = mu_init;
     scalar_t w = 1 / mu_init;
     scalar_t n = 1 / pow(mu_init, static_cast<scalar_t>(0.1L));
@@ -1286,6 +1288,12 @@ auto main() -> int {
     auto traj = solver.make_trajectory(control_generator_t{u_idx});
     auto new_traj = traj.clone();
     auto mults = solver.zero_multipliers<M>();
+
+    for (auto zipped : ranges::zip(mults.eq, traj)) {
+      DDP_BIND(auto&&, (eq, xu), zipped);
+      eq.jac().setRandom();
+      eq.origin() = xu.x();
+    }
 
     prob.compute_derivatives(derivs, traj);
     auto bres = solver.backward_pass<M>(traj, mults, reg, mu, derivs);
@@ -1314,15 +1322,15 @@ auto main() -> int {
         mu *= 10;
         break;
       case mult_update_attempt_result_e::update_success:
-        n /= pow(mu, static_cast<scalar_t>(0.9L));
-        w /= mu;
-        fmt::print("updated multipliers\n");
+        auto opt_obj = solver.optimality_obj(traj, mults, mu, derivs);
+        n = opt_obj / pow(mu_init, static_cast<scalar_t>(0.1L));
+        w /= pow(mu_init, static_cast<scalar_t>(1));
       }
 
       bres = solver.backward_pass<M>(traj, mults, reg, mu, derivs);
       mu = bres.mu;
       // reg = bres.reg;
-      fmt::print("mu: {:20}   reg: {:20}\n", mu, reg);
+      fmt::print("mu: {:20}   reg: {:20}   w: {:20}   n: {:20}\n", mu, reg, w, n);
 
       step = solver.forward_pass<M>(new_traj, traj, mults, bres, true);
       if (step >= 0.5) {
