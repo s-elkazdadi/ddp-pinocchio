@@ -3,7 +3,7 @@
 
 DOCTEST_TEST_CASE("regular indexer") {
   using namespace ddp;
-  auto idx = indexing::mat_regular_indexer(3, 12, dyn_index(3), fix_index<4>{}, dyn_index(3), fix_index<4>{});
+  auto idx = indexing::mat_regular_indexer(3, 12, dyn_index(3), fix_index<4>{});
 
   DOCTEST_CHECK(idx.index_begin() == 3);
   DOCTEST_CHECK(idx.index_end() == 12);
@@ -41,9 +41,9 @@ DOCTEST_TEST_CASE("regular indexer") {
 
 DOCTEST_TEST_CASE("compose indexers") {
   using namespace ddp;
-  auto idx = indexing::vec_regular_indexer(0, 12, fix_index<3>{}, fix_index<3>{});
-  auto idx2 = indexing::vec_regular_indexer(0, 12, dyn_index{2}, fix_index<3>{});
-  auto idx3 = indexing::vec_regular_indexer(0, 12, dyn_index{3}, fix_index<4>{});
+  auto idx = indexing::vec_regular_indexer(0, 12, fix_index<3>{});
+  auto idx2 = indexing::vec_regular_indexer(0, 12, fix_index<2>{});
+  auto idx3 = indexing::vec_regular_indexer(0, 12, fix_index<3>{});
 
   auto filtered = indexing::periodic_row_filter(idx, 3, 2);
   auto filtered2 = indexing::periodic_row_filter(idx3, 2, 1);
@@ -53,11 +53,11 @@ DOCTEST_TEST_CASE("compose indexers") {
 
   auto it = begin(prod);
 
-  static_assert(decltype((*it).max_rows())::value_at_compile_time == 6, "");
-  static_assert(decltype((*it).max_cols())::value_at_compile_time == 4, "");
+  static_assert(decltype((*it).max_rows())::value_at_compile_time == 5, "");
+  static_assert(decltype((*it).max_cols())::value_at_compile_time == 3, "");
 
-  DOCTEST_CHECK((*it).max_rows().value() == 6);
-  DOCTEST_CHECK((*it).max_cols().value() == 4);
+  DOCTEST_CHECK((*it).max_rows().value() == 5);
+  DOCTEST_CHECK((*it).max_cols().value() == 3);
 
   DOCTEST_CHECK((*it).rows().value() == 2);
   DOCTEST_CHECK((*it).cols().value() == 0);

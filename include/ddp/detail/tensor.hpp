@@ -36,10 +36,11 @@ public:
   tensor_indexer_t(Idx_O idx_o, Idx_L idx_l, Idx_R idx_r) noexcept
       : m_idx_o{DDP_MOVE(idx_o)}, m_idx_l{DDP_MOVE(idx_l)}, m_idx_r{DDP_MOVE(idx_r)}, m_required_memory{0} {
 
-    assert(m_idx_o.index_begin() == m_idx_l.index_begin());
-    assert(m_idx_o.index_begin() == m_idx_r.index_begin());
-    assert(m_idx_o.index_end() == m_idx_l.index_end());
-    assert(m_idx_o.index_end() == m_idx_r.index_end());
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", m_idx_o.index_begin() == m_idx_l.index_begin()),
+        ("", m_idx_o.index_begin() == m_idx_r.index_begin()),
+        ("", m_idx_o.index_end() == m_idx_l.index_end()),
+        ("", m_idx_o.index_end() == m_idx_r.index_end()));
 
     bool debug = false;
     if (m_idx_l.max_rows().value() == 44 and m_idx_r.max_rows().value() == 44 and m_idx_o.max_rows().value() == 44) {
@@ -138,17 +139,19 @@ struct tensor_view_t {
   auto indiml() const noexcept -> In_DimL { return m_indiml; }
   auto indimr() const noexcept -> In_DimR { return m_indimr; }
   auto operator()(index_t i, index_t j, index_t k) const noexcept -> T& {
-    assert(i < m_outdim.value());
-    assert(j < m_indiml.value());
-    assert(k < m_indimr.value());
+    DDP_ASSERT_MSG_ALL_OF( //
+        ("", i < m_outdim.value()),
+        ("", j < m_indiml.value()),
+        ("", k < m_indimr.value()));
     return m_data[i + j * m_outdim.value() + k * (m_outdim * m_indiml).value()];
   }
 
   void assign(tensor_view_t<value_type const, Out_Dim, In_DimL, In_DimR> other) {
     static_assert(not std::is_const<T>::value, "");
-    assert(m_outdim == other.m_outdim);
-    assert(m_indiml == other.m_indiml);
-    assert(m_indimr == other.m_indimr);
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", m_outdim == other.m_outdim),
+        ("", m_indiml == other.m_indiml),
+        ("", m_indimr == other.m_indimr));
 
     index_t size = (m_outdim * m_indiml * m_indimr).value();
     if (std::is_trivially_copyable<value_type>::value) {
@@ -177,10 +180,13 @@ struct tensor_view_t {
       matrix_mut_view_t<value_type, In_DimL, In_DimR> out,
       matrix_const_view_t<value_type, Out_Dim, fix_index<1>> v) const noexcept {
 
-    assert(v.rows() == m_outdim.value());
-    assert(out.rows() == m_indiml.value());
-    assert(out.cols() == m_indimr.value());
-    assert(out.outerStride() == out.rows());
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", v.rows() == m_outdim.value()),
+        ("", out.rows() == m_indiml.value()),
+        ("", out.cols() == m_indimr.value()));
+    DDP_ASSERT_MSG_ANY_OF( //
+        ("non contiguous matrix", out.rows() == 1),
+        ("", out.outerStride() == out.rows()));
 
     contiguous_matrix_const_view_t<value_type, Out_Dim, mul_t<In_DimL, In_DimR>> //
         in_{m_data, m_outdim.value(), (m_indiml * m_indimr).value()};
@@ -195,16 +201,17 @@ struct tensor_view_t {
       matrix_mut_view_t<value_type, Out_Dim, In_DimL> out,
       matrix_const_view_t<value_type, In_DimR, fix_index<1>> v) const noexcept {
 
-    assert(v.rows() == m_indimr.value());
-    assert(out.rows() == m_outdim.value());
-    assert(out.cols() == m_indiml.value());
-    assert(out.outerStride() == out.rows());
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", v.rows() == m_indimr.value()),
+        ("", out.rows() == m_outdim.value()),
+        ("", out.cols() == m_indiml.value()),
+        ("non contiguous matrix", out.outerStride() == out.rows()));
 
     matrix_const_view_t<value_type, mul_t<Out_Dim, In_DimL>, In_DimR> //
         in{m_data, (m_outdim * m_indiml).value(), m_indimr.value()};
 
     matrix_mut_view_t<value_type, mul_t<Out_Dim, In_DimL>, fix_index<1>> //
-        out_{out_, (m_outdim * m_indiml).value()};
+        out_{out.data(), (m_outdim * m_indiml).value()};
 
     out_.noalias() += in * v;
   }
@@ -213,9 +220,10 @@ struct tensor_view_t {
       matrix_mut_view_t<value_type, Out_Dim, In_DimR> out,
       matrix_const_view_t<value_type, In_DimL, fix_index<1>> v) const noexcept {
 
-    assert(v.rows() == m_indiml.value());
-    assert(out.rows() == m_outdim.value());
-    assert(out.cols() == m_indimr.value());
+    DDP_ASSERT_MSG_ALL_OF( //
+        ("", v.rows() == m_indiml.value()),
+        ("", out.rows() == m_outdim.value()),
+        ("", out.cols() == m_indimr.value()));
 
     for (index_t i = 0; i < m_indimr.value(); ++i) {
 

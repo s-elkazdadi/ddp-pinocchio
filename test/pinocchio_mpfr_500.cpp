@@ -9,7 +9,7 @@
 template struct ddp::pinocchio::model_t<                                //
     boost::multiprecision::number<                                      //
         boost::multiprecision::mpfr_float_backend<                      //
-            500,                                                        //
+            1000,                                                        //
             boost::multiprecision::mpfr_allocation_type::allocate_stack //
             >,                                                          //
         boost::multiprecision::et_off>                                  //

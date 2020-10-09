@@ -67,36 +67,6 @@ void buildAllJointsModel(Model& model) {
       SE3::Identity(),
       "planar",
       Inertia::Random());
-  addJointAndBody(model, JointModelRX(), model.getJointId("planar_joint"), SE3::Identity(), "rx", Inertia::Random());
-  addJointAndBody(model, JointModelPX(), model.getJointId("rx_joint"), SE3::Identity(), "px", Inertia::Random());
-  addJointAndBody(
-      model,
-      JointModelPrismaticUnaligned(SE3::Vector3(1, 0, 0)),
-      model.getJointId("px_joint"),
-      SE3::Identity(),
-      "pu",
-      Inertia::Random());
-  addJointAndBody(
-      model,
-      JointModelRevoluteUnaligned(SE3::Vector3(0, 0, 1)),
-      model.getJointId("pu_joint"),
-      SE3::Identity(),
-      "ru",
-      Inertia::Random());
-  addJointAndBody(
-      model,
-      JointModelSphericalZYX(),
-      model.getJointId("ru_joint"),
-      SE3::Identity(),
-      "sphericalZYX",
-      Inertia::Random());
-  addJointAndBody(
-      model,
-      JointModelTranslation(),
-      model.getJointId("sphericalZYX_joint"),
-      SE3::Identity(),
-      "translation",
-      Inertia::Random());
 }
 } // namespace pinocchio
 
@@ -214,103 +184,21 @@ auto model_t<T, Nq, Nv>::get_data() const noexcept -> impl_data_t* {
 }
 
 template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::validate_config_vector(
-    const_view_t<Nq> q,   //
-    fmt::string_view name //
-) const noexcept {
-  if (not fixed_size) {
-    DDP_ASSERT(
-        q.rows() == m_config_dim,
-        fmt::format( //
-            "{} has {} rows. (expected: {})\n",
-            name,
-            q.rows(),
-            m_config_dim));
-  }
-}
-
-template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::validate_tangent_vector(
-    const_view_t<Nv> v,   //
-    fmt::string_view name //
-) const noexcept {
-  if (not fixed_size) {
-    DDP_ASSERT(
-        v.rows() == m_tangent_dim,
-        fmt::format( //
-            "{} has {} rows. (expected: {})\n",
-            name,
-            v.rows(),
-            m_tangent_dim));
-  }
-}
-
-template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::validate_tangent_matrix(
-    const_view_t<Nv, Nv> m, //
-    fmt::string_view name   //
-) const noexcept {
-  if (not fixed_size) {
-    DDP_ASSERT(
-        m.rows() == m_tangent_dim and m.cols() == m_tangent_dim,
-        (fmt::format( //
-            "{} has shape [{}, {}]. (expected: [{}, {}])\n",
-            name,
-            m.rows(),
-            m.cols(),
-            m_tangent_dim,
-            m_tangent_dim)));
-  }
-}
-
-template <typename T, index_t Nq, index_t Nv>
-template <typename Out, typename In>
-void model_t<T, Nq, Nv>::validate_similar_jac_matrices(
-    Out m1,                 //
-    In m2,                  //
-    fmt::string_view name1, //
-    fmt::string_view name2  //
-) const noexcept {
-  if (not fixed_size) {
-    DDP_ASSERT(                                    //
-        m1.cols() == m_tangent_dim,                //
-        fmt::format(                               //
-            "{} has {} columns. (expected: {})\n", //
-            name1,                                 //
-            m1.cols(),                             //
-            m_tangent_dim)                         //
-    );
-
-    DDP_ASSERT(                                    //
-        m2.cols() == m_tangent_dim,                //
-        fmt::format(                               //
-            "{} has {} columns. (expected: {})\n", //
-            name2,                                 //
-            m2.cols(),                             //
-            m_tangent_dim)                         //
-    );
-
-    DDP_ASSERT(                                                           //
-        m1.rows() == m2.rows(),                                           //
-        fmt::format(                                                      //
-            "{} and {} have a mismatching number of rows. ({} and {})\n", //
-            name1,                                                        //
-            name2,                                                        //
-            m1.rows(),                                                    //
-            m2.rows())                                                    //
-    );
-  }
+auto model_t<T, Nq, Nv>::model_name() const noexcept -> fmt::string_view {
+  return m_model->m_impl.name;
 }
 
 template <typename T, index_t Nq, index_t Nv>
 void model_t<T, Nq, Nv>::neutral_configuration(mut_view_t<Nq> out_q) const noexcept {
-  validate_config_vector(eigen::as_const_view(out_q), "output configuration vector");
+
+  DDP_ASSERT_MSG("output configuration vector is not correctly sized", out_q.rows() == m_config_dim);
   ::pinocchio::neutral(m_model->m_impl, out_q);
 }
 
 template <typename T, index_t Nq, index_t Nv>
 void model_t<T, Nq, Nv>::random_configuration(mut_view_t<Nq> out_q) const noexcept {
-  validate_config_vector(eigen::as_const_view(out_q), "output configuration vector");
+
+  DDP_ASSERT_MSG("output configuration vector is not correctly sized", out_q.rows() == m_config_dim);
   ::pinocchio::randomConfiguration(       //
       m_model->m_impl,                    //
       m_model->m_impl.lowerPositionLimit, //
@@ -325,11 +213,13 @@ void model_t<T, Nq, Nv>::integrate(
     const_view_t<Nq> q,   //
     const_view_t<Nv> v    //
 ) const noexcept {
-  validate_config_vector(eigen::as_const_view(out_q), "output configuration vector");
-  validate_config_vector(q, "configuration vector");
-  validate_tangent_vector(v, "tangent vector");
-  DDP_ASSERT(not q.hasNaN(), "invalid data");
-  DDP_ASSERT(not v.hasNaN(), "invalid data");
+  DDP_ASSERT_MSG_ALL_OF(
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("tangent vector is not correctly sized", v.rows() == m_tangent_dim),
+      ("output configuration vector is not correctly sized", out_q.rows() == m_config_dim),
+      ("invalid data", not q.hasNaN()),
+      ("invalid data", not v.hasNaN()));
+  ;
   ::pinocchio::integrate(m_model->m_impl, q, v, out_q);
 }
 
@@ -339,11 +229,13 @@ void model_t<T, Nq, Nv>::d_integrate_dq(
     const_view_t<Nq> q,          //
     const_view_t<Nv> v           //
 ) const noexcept {
-  validate_tangent_matrix(eigen::as_const_view(out_q_dq), "output jacobian matrix");
-  validate_config_vector(q, "configuration vector");
-  validate_tangent_vector(v, "tangent vector");
-  DDP_ASSERT(not q.hasNaN(), "invalid data");
-  DDP_ASSERT(not v.hasNaN(), "invalid data");
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output jacobian matrix has the wrong number of rows", out_q_dq.rows() == m_tangent_dim),
+      ("output jacobian matrix has the wrong number of columns", out_q_dq.cols() == m_tangent_dim),
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("tangent vector is not correctly sized", v.rows() == m_tangent_dim),
+      ("invalid data", not q.hasNaN()),
+      ("invalid data", not v.hasNaN()));
   ::pinocchio::dIntegrate(m_model->m_impl, q, v, out_q_dq, ::pinocchio::ArgumentPosition::ARG0);
 }
 
@@ -353,11 +245,14 @@ void model_t<T, Nq, Nv>::d_integrate_dv(
     const_view_t<Nq> q,          //
     const_view_t<Nv> v           //
 ) const noexcept {
-  validate_tangent_matrix(eigen::as_const_view(out_q_dv), "output jacobian");
-  validate_config_vector(q, "configuration vector");
-  validate_tangent_vector(v, "tangent vector");
-  DDP_ASSERT(not q.hasNaN(), "invalid data");
-  DDP_ASSERT(not v.hasNaN(), "invalid data");
+
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output jacobian has the wrong number of rows", out_q_dv.rows() == m_tangent_dim),
+      ("output jacobian has the wrong number of columns", out_q_dv.cols() == m_tangent_dim),
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("tangent vector is not correctly sized", v.rows() == m_tangent_dim),
+      ("invalid data", not q.hasNaN()),
+      ("invalid data", not v.hasNaN()));
   ::pinocchio::dIntegrate(m_model->m_impl, q, v, out_q_dv, ::pinocchio::ArgumentPosition::ARG1);
 }
 
@@ -370,11 +265,14 @@ void model_t<T, Nq, Nv>::d_integrate_transport_dq_or_dv(
     const_view_t<Nv> v, //
     bool dq             //
 ) const noexcept {
-  validate_similar_jac_matrices(eigen::as_const_view(out_J), in_J, "output jacobian", "input jacobian");
-  validate_config_vector(q, "configuration vector");
-  validate_tangent_vector(v, "tangent vector");
-  DDP_ASSERT(not q.hasNaN(), "invalid data");
-  DDP_ASSERT(not v.hasNaN(), "invalid data");
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output jacobian has the wrong number of columns", out_J.cols() == m_tangent_dim),
+      ("input jacobian has the wrong number of columns", in_J.cols() == m_tangent_dim),
+      ("{} and output jacobian have a mismatching number of rows.", out_J.rows() == in_J.rows()),
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("tangent vector is not correctly sized", v.rows() == m_tangent_dim),
+      ("invalid data", not q.hasNaN()),
+      ("invalid data", not v.hasNaN()));
 
   auto arg = dq ? ::pinocchio::ArgumentPosition::ARG0 : ::pinocchio::ArgumentPosition::ARG1;
   if (in_J.data() == out_J.data()) {
@@ -432,11 +330,13 @@ void model_t<T, Nq, Nv>::difference(
     const_view_t<Nq> q_start, //
     const_view_t<Nq> q_finish //
 ) const noexcept {
-  validate_tangent_vector(eigen::as_const_view(out_v), "output tangent vector");
-  validate_config_vector(q_start, "starting configuration vector");
-  validate_config_vector(q_finish, "finish configuration vector");
-  DDP_ASSERT(not q_start.hasNaN(), "invalid data");
-  DDP_ASSERT(not q_finish.hasNaN(), "invalid data");
+
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output tangent vector is not correctly sized", out_v.rows() == m_tangent_dim),
+      ("starting configuration vector is not correctly sized", q_start.rows() == m_config_dim),
+      ("finish configuration vector is not correctly sized", q_finish.rows() == m_config_dim),
+      ("invalid data", not q_start.hasNaN()),
+      ("invalid data", not q_finish.hasNaN()));
 
   ::pinocchio::difference(m_model->m_impl, q_start, q_finish, out_v);
 }
@@ -447,11 +347,14 @@ void model_t<T, Nq, Nv>::d_difference_dq_start(
     const_view_t<Nq> q_start,          //
     const_view_t<Nq> q_finish          //
 ) const noexcept {
-  validate_tangent_matrix(eigen::as_const_view(out_v_dq_start), "output jacobian");
-  validate_config_vector(q_start, "starting configuration vector");
-  validate_config_vector(q_finish, "finish configuration vector");
-  DDP_ASSERT(not q_start.hasNaN(), "invalid data");
-  DDP_ASSERT(not q_finish.hasNaN(), "invalid data");
+
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output jacobian has the wrong number of rows", out_v_dq_start.rows() == m_tangent_dim),
+      ("output jacobian has the wrong number of columns", out_v_dq_start.cols() == m_tangent_dim),
+      ("starting configuration vector is not correctly sized", q_start.rows() == m_config_dim),
+      ("finish configuration vector is not correctly sized", q_finish.rows() == m_config_dim),
+      ("invalid data", not q_start.hasNaN()),
+      ("invalid data", not q_finish.hasNaN()));
 
   ::pinocchio::dDifference(m_model->m_impl, q_start, q_finish, out_v_dq_start, ::pinocchio::ArgumentPosition::ARG0);
 }
@@ -462,11 +365,14 @@ void model_t<T, Nq, Nv>::d_difference_dq_finish(
     const_view_t<Nq> q_start,           //
     const_view_t<Nq> q_finish           //
 ) const noexcept {
-  validate_tangent_matrix(eigen::as_const_view(out_v_dq_finish), "output jacobian");
-  validate_config_vector(q_start, "starting configuration vector");
-  validate_config_vector(q_finish, "finish configuration vector");
-  DDP_ASSERT(not q_start.hasNaN(), "invalid data");
-  DDP_ASSERT(not q_finish.hasNaN(), "invalid data");
+
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output jacobian has the wrong number of rows", out_v_dq_finish.rows() == m_tangent_dim),
+      ("output jacobian has the wrong number of columns", out_v_dq_finish.cols() == m_tangent_dim),
+      ("starting configuration vector is not correctly sized", q_start.rows() == m_config_dim),
+      ("finish configuration vector is not correctly sized", q_finish.rows() == m_config_dim),
+      ("invalid data", not q_start.hasNaN()),
+      ("invalid data", not q_finish.hasNaN()));
 
   ::pinocchio::dDifference(m_model->m_impl, q_start, q_finish, out_v_dq_finish, ::pinocchio::ArgumentPosition::ARG1);
 }
@@ -478,13 +384,15 @@ void model_t<T, Nq, Nv>::dynamics_aba( //
     const_view_t<Nv> v,                //
     const_view_t<Nv> tau               //
 ) const noexcept {
-  validate_tangent_vector(eigen::as_const_view(out_acceleration), "output acceleration vector");
-  validate_config_vector(q, "configuration vector");
-  validate_tangent_vector(v, "velocity vector");
-  validate_tangent_vector(tau, "control vector");
-  DDP_ASSERT(not q.hasNaN(), "invalid data");
-  DDP_ASSERT(not v.hasNaN(), "invalid data");
-  DDP_ASSERT(not tau.hasNaN(), "invalid data");
+
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output acceleration vector is not correctly sized", out_acceleration.rows() == m_tangent_dim),
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("velocity vector is not correctly sized", v.rows() == m_tangent_dim),
+      ("control vector is not correctly sized", tau.rows() == m_tangent_dim),
+      ("invalid data", not q.hasNaN()),
+      ("invalid data", not v.hasNaN()),
+      ("invalid data", not tau.hasNaN()));
 
   impl_data_t* data = this->get_data();
   ::pinocchio::aba(m_model->m_impl, data->m_impl, q, v, tau);
@@ -500,21 +408,28 @@ void model_t<T, Nq, Nv>::d_dynamics_aba(      //
     const_view_t<Nv> v,                       //
     const_view_t<Nv> tau                      //
 ) const noexcept {
-  validate_tangent_matrix(
-      eigen::as_const_view(out_acceleration_dq),
-      "output acceleration jacobian with respect to the configuration");
-  validate_tangent_matrix(
-      eigen::as_const_view(out_acceleration_dv),
-      "output acceleration jacobian with respect to the velocity");
-  validate_tangent_matrix(
-      eigen::as_const_view(out_acceleration_dtau),
-      "output acceleration jacobian with respect to the control");
-  validate_config_vector(q, "configuration vector");
-  validate_tangent_vector(v, "velocity vector");
-  validate_tangent_vector(tau, "control vector");
-  DDP_ASSERT(not q.hasNaN(), "invalid data");
-  DDP_ASSERT(not v.hasNaN(), "invalid data");
-  DDP_ASSERT(not tau.hasNaN(), "invalid data");
+
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output acceleration jacobian with respect to the velocity has the wrong number of rows",
+       out_acceleration_dv.rows() == m_tangent_dim),
+      ("output acceleration jacobian with respect to the configuration has the wrong number of rows",
+       out_acceleration_dq.rows() == m_tangent_dim),
+      ("output acceleration jacobian with respect to the configuration has the wrong number of columns",
+       out_acceleration_dq.cols() == m_tangent_dim),
+      ("output acceleration jacobian with respect to the velocity has the wrong number of columns",
+       out_acceleration_dv.cols() == m_tangent_dim),
+      ("output acceleration jacobian with respect to the control has the wrong number of rows",
+       out_acceleration_dtau.rows() == m_tangent_dim),
+      ("output acceleration jacobian with respect to the control has the wrong number of columns",
+       eigen::as_const_view(out_acceleration_dtau).cols() == m_tangent_dim),
+
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("velocity vector is not correctly sized", v.rows() == m_tangent_dim),
+      ("control vector is not correctly sized", tau.rows() == m_tangent_dim),
+
+      ("invalid data", not q.hasNaN()),
+      ("invalid data", not v.hasNaN()),
+      ("invalid data", not tau.hasNaN()));
 
   impl_data_t* data = this->get_data();
   ::pinocchio::computeABADerivatives(
@@ -535,13 +450,15 @@ void model_t<T, Nq, Nv>::inverse_dynamics_rnea( //
     const_view_t<Nv> v,                         //
     const_view_t<Nv> a                          //
 ) const noexcept {
-  validate_tangent_vector(eigen::as_const_view(out_tau), "output control vector");
-  validate_config_vector(q, "configuration vector");
-  validate_tangent_vector(v, "velocity vector");
-  validate_tangent_vector(a, "acceleration vector");
-  DDP_ASSERT(not q.hasNaN(), "invalid data");
-  DDP_ASSERT(not v.hasNaN(), "invalid data");
-  DDP_ASSERT(not a.hasNaN(), "invalid data");
+
+  DDP_ASSERT_MSG_ALL_OF(
+      ("output control vector is not correctly sized", out_tau.rows() == m_tangent_dim),
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("velocity vector is not correctly sized", v.rows() == m_tangent_dim),
+      ("acceleration vector is not correctly sized", a.rows() == m_tangent_dim),
+      ("invalid data", not q.hasNaN()),
+      ("invalid data", not v.hasNaN()),
+      ("invalid data", not a.hasNaN()));
 
   impl_data_t* data = this->get_data();
   ::pinocchio::rnea(m_model->m_impl, data->m_impl, q, v, a);

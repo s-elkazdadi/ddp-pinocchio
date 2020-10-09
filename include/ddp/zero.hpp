@@ -9,9 +9,7 @@ struct zero_t {
   static auto transpose() -> zero_t { return {}; }
   static auto row(index_t) -> zero_t { return {}; }
   template <typename T>
-  auto operator=(T const&) -> zero_t& {
-    std::terminate();
-  }
+  auto operator=(T const&) -> zero_t& = delete;
 
   template <typename T>
   using neg_t = decltype(-DDP_DECLVAL(T const&));

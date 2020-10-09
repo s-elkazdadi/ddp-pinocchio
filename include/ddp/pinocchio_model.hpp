@@ -14,6 +14,9 @@ using owner = T;
 
 template <typename T, index_t Nq = Eigen::Dynamic, index_t Nv = Eigen::Dynamic>
 struct model_t {
+  using scalar_t = T;
+  static constexpr bool fixed_size = Nq != Eigen::Dynamic and Nv != Eigen::Dynamic;
+
 private:
   struct impl_model_t;
   struct impl_data_t;
@@ -24,8 +27,6 @@ private:
   index_t m_config_dim = 0;
   index_t m_tangent_dim = 0;
 
-public:
-  using scalar_t = T;
   template <index_t Rows, index_t Cols = 1>
   using mut_view_t = eigen::view_t<Eigen::Matrix<scalar_t, Rows, Cols>>;
 
@@ -37,28 +38,6 @@ public:
   template <index_t Rows, index_t Cols = 1>
   using row_major_const_view_t = eigen::view_t<Eigen::Matrix<scalar_t, Rows, Cols, Eigen::RowMajor> const>;
 
-  static constexpr bool fixed_size = Nq != Eigen::Dynamic and Nv != Eigen::Dynamic;
-
-  using state_size_kind = DDP_CONDITIONAL(fixed_size, fix_index<Nq + Nv>, dyn_index);
-  using dstate_size_kind = DDP_CONDITIONAL(fixed_size, fix_index<Nv + Nv>, dyn_index);
-
-  static constexpr index_t eigen_config_size_c = fixed_size ? Nq : Eigen::Dynamic;
-  static constexpr index_t eigen_vel_size_c = fixed_size ? Nv : Eigen::Dynamic;
-
-  static constexpr index_t eigen_state_size_c = fixed_size ? (Nq + Nv) : Eigen::Dynamic;
-  static constexpr index_t eigen_dstate_size_c = fixed_size ? (Nv + Nv) : Eigen::Dynamic;
-
-  using state_indexer_t = indexing::regular_indexer_t<state_size_kind>;
-  using dstate_indexer_t = indexing::regular_indexer_t<dstate_size_kind>;
-
-  auto state_indexer(index_t begin, index_t end) const -> state_indexer_t {
-    return indexing::vec_regular_indexer(begin, end, state_size_kind{configuration_dim() + tangent_dim()});
-  }
-  auto dstate_indexer(index_t begin, index_t end) const -> dstate_indexer_t {
-    return indexing::vec_regular_indexer(begin, end, dstate_size_kind{tangent_dim() + tangent_dim()});
-  }
-
-private:
   auto get_data() const noexcept -> impl_data_t*;
 
   template <typename Model_Builder>
@@ -95,11 +74,20 @@ public:
   auto operator=(model_t const&) -> model_t& = delete;
   auto operator=(model_t &&) -> model_t& = delete;
 
+  auto model_name() const noexcept -> fmt::string_view;
+
   explicit model_t(fmt::string_view urdf_path, index_t n_parallel = 1) noexcept(false);
   static auto all_joints_test_model(index_t n_parallel = 1) noexcept(false) -> model_t;
 
   auto configuration_dim() const noexcept -> index_t { return m_config_dim; }
   auto tangent_dim() const noexcept -> index_t { return m_tangent_dim; }
+
+  auto configuration_dim_c() const noexcept -> DDP_CONDITIONAL(fixed_size, fix_index<Nq>, dyn_index) {
+    return DDP_CONDITIONAL(fixed_size, fix_index<Nq>, dyn_index){m_config_dim};
+  }
+  auto tangent_dim_c() const noexcept -> DDP_CONDITIONAL(fixed_size, fix_index<Nv>, dyn_index) {
+    return DDP_CONDITIONAL(fixed_size, fix_index<Nv>, dyn_index){m_tangent_dim};
+  }
 
   void neutral_configuration(mut_view_t<Nq> out_q) const noexcept;
   void random_configuration(mut_view_t<Nq> out_q) const noexcept;
@@ -220,50 +208,6 @@ public:
   auto _d_integrate_dv(Q const& q, V const& v) const -> Eigen::Matrix<scalar_t, Nv, Nv> {
     Eigen::Matrix<scalar_t, Nv, Nv> out{m_tangent_dim, m_tangent_dim};
     integrate_dv(eigen::as_mut_view(out), eigen::as_const_view(q.eval()), eigen::as_const_view(v.eval()));
-    return out;
-  }
-
-  template <typename J_In, typename Q, typename V>
-  auto _d_integrate_transport_dq(J_In const& in_J, Q const& q, V const& v) const -> Eigen::Matrix<
-      scalar_t,
-      J_In::RowsAtCompileTime,
-      Nv,
-      J_In::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor,
-      J_In::MaxRowsAtCompileTime> {
-    Eigen::Matrix<
-        scalar_t,
-        J_In::RowsAtCompileTime,
-        Nv,
-        J_In::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor,
-        J_In::MaxRowsAtCompileTime>
-        out{in_J.rows(), in_J.cols()};
-    d_integrate_transport_dq(
-        eigen::dyn_rows(eigen::as_mut_view(out)),
-        eigen::dyn_rows(eigen::as_const_view(in_J)),
-        eigen::as_const_view(q.eval()),
-        eigen::as_const_view(v.eval()));
-    return out;
-  }
-
-  template <typename J_In, typename Q, typename V>
-  auto _d_integrate_transport_dv(J_In const& in_J, Q const& q, V const& v) const -> Eigen::Matrix<
-      scalar_t,
-      J_In::RowsAtCompileTime,
-      Nv,
-      J_In::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor,
-      J_In::MaxRowsAtCompileTime> {
-    Eigen::Matrix<
-        scalar_t,
-        J_In::RowsAtCompileTime,
-        Nv,
-        J_In::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor,
-        J_In::MaxRowsAtCompileTime>
-        out{in_J.rows(), in_J.cols()};
-    d_integrate_transport_dv(
-        eigen::dyn_rows(eigen::as_mut_view(out)),
-        eigen::dyn_rows(eigen::as_const_view(in_J)),
-        eigen::as_const_view(q.eval()),
-        eigen::as_const_view(v.eval()));
     return out;
   }
 

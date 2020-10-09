@@ -16,15 +16,17 @@
 #include <cassert>
 #endif
 
-#include "boost/preprocessor/cat.hpp"
-#include "boost/preprocessor/tuple/size.hpp"
-#include "boost/preprocessor/tuple/to_seq.hpp"
-#include "boost/preprocessor/seq/for_each.hpp"
-#include "boost/preprocessor/seq/for_each_i.hpp"
-#include "boost/preprocessor/punctuation/remove_parens.hpp"
-#include "boost/preprocessor/variadic/to_seq.hpp"
-#include "boost/preprocessor/seq/variadic_seq_to_seq.hpp"
-#include "boost/preprocessor/seq/seq.hpp"
+#include <initializer_list>
+
+#include <boost/preprocessor/cat.hpp>
+#include <boost/preprocessor/tuple/size.hpp>
+#include <boost/preprocessor/tuple/to_seq.hpp>
+#include <boost/preprocessor/seq/for_each.hpp>
+#include <boost/preprocessor/seq/for_each_i.hpp>
+#include <boost/preprocessor/punctuation/remove_parens.hpp>
+#include <boost/preprocessor/variadic/to_seq.hpp>
+#include <boost/preprocessor/seq/variadic_seq_to_seq.hpp>
+#include <boost/preprocessor/seq/seq.hpp>
 
 #include <Eigen/Core>
 #include <fmt/core.h>
@@ -34,10 +36,20 @@
 #define DDP_VSIZEOF(...) static_cast<::ddp::index_t>(sizeof...(__VA_ARGS__))
 #define DDP_MOVE(...) static_cast<typename ::std::remove_reference<decltype(__VA_ARGS__)>::type&&>(__VA_ARGS__)
 
-#define DDP_ASSERT(Cond, Message) (static_cast<bool>(Cond) ? (void)(0) : ::ddp::fast_fail(Message))
+#define DDP_DECLTYPE_AUTO(...)                                                                                         \
+  noexcept(noexcept(__VA_ARGS__))->decltype(__VA_ARGS__) { return __VA_ARGS__; }                                       \
+  static_assert(true, "")
+
+#define DDP_PRECOND_DECLTYPE_AUTO(Precondition_Block, ...)                                                             \
+  noexcept(noexcept(__VA_ARGS__))->decltype(__VA_ARGS__) {                                                             \
+    BOOST_PP_REMOVE_PARENS Precondition_Block return __VA_ARGS__;                                                      \
+  }                                                                                                                    \
+  static_assert(true, "")
+
+#include "ddp/detail/assertions.hpp"
 
 /**********************************************************************************************************************/
-#define DDP_IMPL_BIND(r, Tuple, Index, Identifier) auto&& Identifier = get<Index>(Tuple);
+#define DDP_IMPL_BIND(r, Tuple, Index, Identifier) auto&& Identifier = ::ddp::detail::adl_get<Index>(Tuple);
 
 #define DDP_IMPL_BIND_ID_SEQ(CV_Auto, Identifiers, Tuple, SeqSize, TupleId)                                            \
   static_assert(                                                                                                       \
@@ -50,7 +62,6 @@
   ((void)0)
 
 #define DDP_BIND(CV_Auto, Identifiers, Tuple)                                                                          \
-  using ddp::detail::get;                                                                                              \
   DDP_IMPL_BIND_ID_SEQ(                                                                                                \
       CV_Auto,                                                                                                         \
       BOOST_PP_TUPLE_TO_SEQ(Identifiers),                                                                              \
@@ -59,9 +70,43 @@
       BOOST_PP_CAT(_dummy_tuple_variable_id_, __LINE__))
 /**********************************************************************************************************************/
 
+namespace gsl {
+template <typename T>
+using owner = T;
+} // namespace gsl
+
 namespace ddp {
 
 [[noreturn]] void fast_fail(fmt::string_view message) noexcept;
+void print_msg(fmt::string_view message) noexcept;
+
+struct log_file_t {
+  std::FILE* ptr;
+  explicit log_file_t(char const* path);
+
+private:
+  struct open_file_set_t;
+  static open_file_set_t open_files;
+  static void add_file(char const* path);
+};
+
+struct chronometer_t {
+
+  chronometer_t(chronometer_t const&) = delete;
+  chronometer_t(chronometer_t&&) = delete;
+  auto operator=(chronometer_t const&) -> chronometer_t& = delete;
+  auto operator=(chronometer_t &&) -> chronometer_t& = delete;
+
+  explicit chronometer_t(char const* message, log_file_t file = log_file_t{"/tmp/chrono.log"});
+  ~chronometer_t();
+
+private:
+  std::intmax_t m_begin;
+  std::intmax_t m_end;
+
+  char const* m_message;
+  log_file_t const m_file;
+};
 
 struct unsafe_t {};
 struct safe_t {};
@@ -74,6 +119,13 @@ using usize = std::size_t;
 using u64 = std::uint64_t;
 
 namespace detail {
+
+template <size_t I>
+void get() = delete;
+
+template <std::size_t I, typename T>
+auto adl_get(T&& x) DDP_DECLTYPE_AUTO(get<I>(static_cast<T&&>(x)));
+
 template <typename L, typename R>
 using add_t = decltype(DDP_DECLVAL(L) + DDP_DECLVAL(R));
 
@@ -86,6 +138,12 @@ template <> struct conditional<false> { template <typename T, typename F> using 
 
 #define DDP_CONDITIONAL(Cond, ...) typename ::ddp::detail::conditional<(Cond)>::template type<__VA_ARGS__>
 // clang-format on
+
+template <typename... Ts>
+struct tuple;
+
+template <typename... Ts>
+auto make_tuple(Ts... args) -> tuple<Ts...>;
 } // namespace detail
 
 template <index_t N>
@@ -93,12 +151,13 @@ struct fix_index;
 
 struct dyn_index {
 private:
-  index_t m_value;
+  index_t m_value{};
 
 public:
   static constexpr bool known_at_compile_time = false;
   static constexpr index_t value_at_compile_time = Eigen::Dynamic;
 
+  constexpr dyn_index() noexcept : m_value{} {}
   explicit constexpr dyn_index(index_t value) noexcept : m_value{value} {}
   template <index_t N>
   explicit constexpr dyn_index(fix_index<N>) noexcept : m_value{N} {}
@@ -117,7 +176,11 @@ struct fix_index {
   static constexpr const index_t value_at_compile_time = N;
 
   constexpr fix_index() noexcept = default;
-  explicit constexpr fix_index(index_t value) noexcept { assert(value == N); }
+  explicit constexpr fix_index(index_t value) noexcept {
+#if __cplusplus >= 201402L
+    DDP_ASSERT(value == N);
+#endif
+  }
   explicit constexpr fix_index(dyn_index value) noexcept : fix_index{value.value()} {}
 
   constexpr auto value() const -> index_t { return N; }
@@ -168,7 +231,7 @@ enum ternary_e { yes, no, maybe };
   template <typename N, typename M, typename Enable = void>                                                            \
   struct Impl_Name {                                                                                                   \
     static constexpr ternary_e value = maybe;                                                                          \
-    static constexpr void assertion(N n, M m) noexcept { assert(Run_Time_Cond); };                                     \
+    static constexpr void assertion(N n, M m) noexcept { DDP_ASSERT(Run_Time_Cond); };                                 \
   };                                                                                                                   \
                                                                                                                        \
   template <index_t N, index_t M>                                                                                      \
@@ -202,7 +265,13 @@ namespace eigen {
 template <typename T>
 using view_t = Eigen::Map<T, Eigen::Unaligned, Eigen::OuterStride<Eigen::Dynamic>>;
 
-template <typename T, typename Rows, typename Cols, int Options, typename Max_Rows, typename Max_Cols>
+template <
+    typename T,
+    typename Rows,
+    typename Cols,
+    int Options = Eigen::ColMajor,
+    typename Max_Rows = Rows,
+    typename Max_Cols = Cols>
 using matrix_t = Eigen::Matrix<
     T,
     Rows::value_at_compile_time,
@@ -210,6 +279,37 @@ using matrix_t = Eigen::Matrix<
     Options,
     Max_Rows::value_at_compile_time,
     Max_Cols::value_at_compile_time>;
+
+template <typename T, typename Rows, typename Cols, int Options, typename Max_Rows, typename Max_Cols>
+struct matrix_view {
+  using type = view_t<Eigen::Matrix<
+      T,
+      Rows::value_at_compile_time,
+      Cols::value_at_compile_time,
+      Options,
+      Max_Rows::value_at_compile_time,
+      Max_Cols::value_at_compile_time>>;
+};
+
+template <typename T, typename Rows, typename Cols, int Options, typename Max_Rows, typename Max_Cols>
+struct matrix_view<T const, Rows, Cols, Options, Max_Rows, Max_Cols> {
+  using type = view_t<Eigen::Matrix<
+      T,
+      Rows::value_at_compile_time,
+      Cols::value_at_compile_time,
+      Options,
+      Max_Rows::value_at_compile_time,
+      Max_Cols::value_at_compile_time> const>;
+};
+
+template <
+    typename T,
+    typename Rows,
+    typename Cols,
+    int Options = Eigen::ColMajor,
+    typename Max_Rows = Rows,
+    typename Max_Cols = Cols>
+using matrix_view_t = typename matrix_view<T, Rows, Cols, Options, Max_Rows, Max_Cols>::type;
 
 template <typename T>
 struct type_to_size
@@ -331,6 +431,23 @@ using row_kind = DDP_CONDITIONAL(T::RowsAtCompileTime == Eigen::Dynamic, dyn_ind
 template <typename T>
 using col_kind = DDP_CONDITIONAL(T::ColsAtCompileTime == Eigen::Dynamic, dyn_index, fix_index<T::ColsAtCompileTime>);
 
+inline auto n_suffix(index_t n) -> fmt::string_view {
+  DDP_ASSERT(n >= 0);
+  if ((n % 100) / 10 == 1) {
+    return "th";
+  }
+  switch (n % 10) {
+  case 1:
+    return "st";
+  case 2:
+    return "nd";
+  case 3:
+    return "rd";
+  default:
+    return "th";
+  }
+}
+
 template <
     typename... Ts,
     typename std::enable_if<                                                         //
@@ -342,8 +459,11 @@ auto sum(Ts const&... args) noexcept -> decltype(detail::sum_impl<(DDP_VSIZEOF(T
   index_t const all_rows[] = {args.rows()...};
   index_t const all_cols[] = {args.cols()...};
   for (index_t i = 0; i < DDP_VSIZEOF(Ts) - 1; ++i) {
-    assert(all_rows[i + 1] == all_rows[i]);
-    assert(all_cols[i + 1] == all_cols[i]);
+    DDP_ASSERT_MSG_ALL_OF(
+        (fmt::format("{}{} and {}{} operands have mismatching rows", i, n_suffix(i), i + 1, n_suffix(i + 1)),
+         all_rows[i + 1] == all_rows[i]),
+        (fmt::format("{}{} and {}{} operands have mismatching cols", i, n_suffix(i), i + 1, n_suffix(i + 1)),
+         all_cols[i + 1] == all_cols[i]));
   }
 
   return detail::sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(args...);
@@ -362,51 +482,41 @@ auto prod(Ts const&... args) noexcept -> decltype(detail::sum_impl<(DDP_VSIZEOF(
   index_t const all_rows[] = {args.rows()...};
   index_t const all_cols[] = {args.cols()...};
   for (index_t i = 0; i < DDP_VSIZEOF(Ts) - 1; ++i) {
-    assert(all_cols[i] == all_rows[i + 1]);
+    DDP_ASSERT_MSG(
+        fmt::format(
+            "columns of {}{} operand do not match rows of {}{} operand",
+            i,
+            n_suffix(i),
+            i + 1,
+            n_suffix(i + 1)),
+        all_cols[i] == all_rows[i + 1]);
   }
 
   return detail::sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(args...);
 }
 
-template <typename T, typename T_ = typename std::remove_reference<T>::type>
-auto as_mut_view(T&& mat) noexcept                              //
-    -> view_t<                                                  //
-        Eigen::Matrix<                                          //
-            typename T_::Scalar,                                //
-            T_::RowsAtCompileTime,                              //
-            T_::ColsAtCompileTime,                              //
-            T_::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor, //
-            T_::MaxRowsAtCompileTime,                           //
-            T_::MaxColsAtCompileTime                            //
+#define DDP_EIGEN_STORAGE_ORDER(...)                                                                                   \
+  (__VA_ARGS__::ColsAtCompileTime ==                                                                                   \
+   1) /**************************************************************************************************************/ \
+      ? Eigen::ColMajor                                                                                                \
+      : (__VA_ARGS__::RowsAtCompileTime ==                                                                             \
+                 1 /******************************************************************************************/        \
+             ? Eigen::RowMajor                                                                                         \
+             : __VA_ARGS__::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor)
+
+template <typename T>
+auto as_mut_view(T&& mat) noexcept                                                          //
+    -> view_t<                                                                              //
+        Eigen::Matrix<                                                                      //
+            typename std::remove_reference<T>::type::Scalar,                                //
+            std::remove_reference<T>::type::RowsAtCompileTime,                              //
+            std::remove_reference<T>::type::ColsAtCompileTime,                              //
+            std::remove_reference<T>::type::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor, //
+            std::remove_reference<T>::type::MaxRowsAtCompileTime,                           //
+            std::remove_reference<T>::type::MaxColsAtCompileTime                            //
             >> {
-  assert(mat.innerStride() == 1);
+  DDP_ASSERT(mat.innerStride() == 1);
   return {mat.data(), mat.rows(), mat.cols(), mat.outerStride()};
-}
-
-template <
-    typename T,
-    typename Out_Matrix = Eigen::Matrix<
-        typename T::Scalar,
-        Eigen::Dynamic,
-        T::ColsAtCompileTime,
-        T::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor,
-        Eigen::Dynamic,
-        T::MaxColsAtCompileTime>>
-auto dyn_rows(view_t<T> v) noexcept -> view_t<DDP_CONDITIONAL(std::is_const<T>::value, Out_Matrix const, Out_Matrix)> {
-  return {v.data(), v.rows(), v.cols(), v.outerStride()};
-}
-
-template <
-    typename T,
-    typename Out_Matrix = Eigen::Matrix<
-        typename T::Scalar,
-        T::RowsAtCompileTime,
-        Eigen::Dynamic,
-        T::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor,
-        T::MaxRowsAtCompileTime,
-        Eigen::Dynamic>>
-auto dyn_cols(view_t<T> v) noexcept -> view_t<DDP_CONDITIONAL(std::is_const<T>::value, Out_Matrix const, Out_Matrix)> {
-  return {v.data(), v.rows(), v.cols(), v.outerStride()};
 }
 
 template <typename T>
@@ -420,9 +530,156 @@ auto as_const_view(T const& mat) noexcept                      //
             T::MaxRowsAtCompileTime,                           //
             T::MaxColsAtCompileTime                            //
             > const> {
-  assert(mat.innerStride() == 1);
+  DDP_ASSERT(mat.innerStride() == 1);
   return {mat.data(), mat.rows(), mat.cols(), mat.outerStride()};
 }
+
+template <
+    typename T,
+    typename Rows,
+    typename Cols,
+    int Options = Eigen::ColMajor,
+    typename Max_Rows = Rows,
+    typename Max_Cols = Cols>
+auto make_matrix(Rows rows, Cols cols, Max_Rows = {}, Max_Cols = {}) //
+    -> Eigen::Matrix<                                                //
+        T,                                                           //
+        Rows::value_at_compile_time,                                 //
+        Cols::value_at_compile_time,                                 //
+        Options,                                                     //
+        Max_Rows::value_at_compile_time,                             //
+        Max_Cols::value_at_compile_time                              //
+        > {
+  DDP_ASSERT(rows.value() > 0);
+  DDP_ASSERT(cols.value() > 0);
+  return {rows.value(), cols.value()};
+}
+
+template <index_t N, index_t I>
+struct eigen_diff {
+  static constexpr index_t value = (N == Eigen::Dynamic or I == Eigen::Dynamic) ? Eigen::Dynamic : N - I;
+};
+
+template <typename T, typename Idx>
+auto split_at_row(T const& mat, Idx idx) DDP_PRECOND_DECLTYPE_AUTO(
+    ({
+      DDP_DEBUG_ASSERT_MSG_ALL_OF(
+          ("row index must be within bounds", idx.value() >= 0),
+          ("row index must be within bounds", idx.value() <= mat.rows()));
+    }),
+    ddp::detail::make_tuple(
+        eigen::as_const_view(mat.template topRows<Idx::value_at_compile_time>(idx.value())),
+        eigen::as_const_view(
+            mat.template bottomRows<eigen_diff<T::RowsAtCompileTime, Idx::value_at_compile_time>::value>(
+                mat.rows() - idx.value()))));
+
+template <typename T, typename Idx>
+auto split_at_row_mut(T&& mat, Idx idx) DDP_PRECOND_DECLTYPE_AUTO(
+    ({
+      DDP_DEBUG_ASSERT_MSG_ALL_OF(
+          ("row index must be within bounds", idx.value() >= 0),
+          ("row index must be within bounds", idx.value() <= mat.rows()));
+    }),
+    ddp::detail::make_tuple(
+        eigen::as_mut_view(mat.template topRows<Idx::value_at_compile_time>(idx.value())),
+        eigen::as_mut_view(
+            mat.template bottomRows<
+                eigen_diff<std::remove_reference<T>::type::RowsAtCompileTime, Idx::value_at_compile_time>::value>(
+                mat.rows() - idx.value()))));
+
+template <typename T, typename Idx>
+auto split_at_col(T const& mat, Idx idx) DDP_PRECOND_DECLTYPE_AUTO(
+    ({
+      DDP_DEBUG_ASSERT_MSG_ALL_OF(
+          ("col index must be within bounds", idx.value() >= 0),
+          ("col index must be within bounds", idx.value() <= mat.cols()));
+    }),
+    ddp::detail::make_tuple(
+        eigen::as_const_view(mat.template leftCols<Idx::value_at_compile_time>(idx.value())),
+        eigen::as_const_view(
+            mat.template rightCols<eigen_diff<T::ColsAtCompileTime, Idx::value_at_compile_time>::value>(
+                mat.cols() - idx.value()))));
+
+template <typename T, typename Idx>
+auto split_at_col_mut(T&& mat, Idx idx) DDP_PRECOND_DECLTYPE_AUTO(
+    ({
+      DDP_DEBUG_ASSERT_MSG_ALL_OF(
+          ("col index must be within bounds", idx.value() >= 0),
+          ("col index must be within bounds", idx.value() <= mat.cols()));
+    }),
+    ddp::detail::make_tuple(
+        eigen::as_mut_view(mat.template leftCols<Idx::value_at_compile_time>(idx.value())),
+        eigen::as_mut_view(
+            mat.template rightCols<
+                eigen_diff<std::remove_reference<T>::type::ColsAtCompileTime, Idx::value_at_compile_time>::value>(
+                mat.cols() - idx.value()))));
+
+template <typename T, typename Row_Idx, typename Col_Idx>
+auto split_at(T const& mat, Row_Idx row_idx, Col_Idx col_idx) DDP_PRECOND_DECLTYPE_AUTO(
+    ({
+      DDP_DEBUG_ASSERT_MSG_ALL_OF(
+          ("row index must be within bounds", row_idx.value() >= 0),
+          ("row index must be within bounds", row_idx.value() <= mat.rows()),
+          ("col index must be within bounds", col_idx.value() >= 0),
+          ("col index must be within bounds", col_idx.value() <= mat.cols()));
+    }),
+    ddp::detail::make_tuple(
+        eigen::as_const_view(mat.template topLeftCorner<     //
+                             Row_Idx::value_at_compile_time, //
+                             Col_Idx::value_at_compile_time  //
+                             >(row_idx.value(), col_idx.value())),
+
+        eigen::as_const_view(mat.template topRightCorner<                                            //
+                             Row_Idx::value_at_compile_time,                                         //
+                             eigen_diff<T::ColsAtCompileTime, Col_Idx::value_at_compile_time>::value //
+                             >(row_idx.value(), mat.cols() - col_idx.value())),
+
+        eigen::as_const_view(mat.template bottomLeftCorner<                                           //
+                             eigen_diff<T::RowsAtCompileTime, Row_Idx::value_at_compile_time>::value, //
+                             Col_Idx::value_at_compile_time                                           //
+                             >(mat.rows() - row_idx.value(), col_idx.value())),
+
+        eigen::as_const_view(mat.template bottomRightCorner<                                          //
+                             eigen_diff<T::RowsAtCompileTime, Row_Idx::value_at_compile_time>::value, //
+                             eigen_diff<T::ColsAtCompileTime, Col_Idx::value_at_compile_time>::value  //
+                             >(mat.rows() - row_idx.value(), mat.cols() - col_idx.value()))
+
+            ));
+
+template <typename T, typename Row_Idx, typename Col_Idx>
+auto split_at_mut(T&& mat, Row_Idx row_idx, Col_Idx col_idx) DDP_PRECOND_DECLTYPE_AUTO(
+    ({
+      DDP_DEBUG_ASSERT_MSG_ALL_OF(
+          ("row index must be within bounds", row_idx.value() >= 0),
+          ("row index must be within bounds", row_idx.value() <= mat.rows()),
+          ("col index must be within bounds", col_idx.value() >= 0),
+          ("col index must be within bounds", col_idx.value() <= mat.cols()));
+    }),
+    ddp::detail::make_tuple(
+        eigen::as_mut_view(mat.template topLeftCorner<     //
+                           Row_Idx::value_at_compile_time, //
+                           Col_Idx::value_at_compile_time  //
+                           >(row_idx.value(), col_idx.value())),
+
+        eigen::as_mut_view(
+            mat.template topRightCorner<                                                                             //
+                Row_Idx::value_at_compile_time,                                                                      //
+                eigen_diff<std::remove_reference<T>::type::ColsAtCompileTime, Col_Idx::value_at_compile_time>::value //
+                >(row_idx.value(), mat.cols() - col_idx.value())),
+
+        eigen::as_mut_view(
+            mat.template bottomLeftCorner<                                                                            //
+                eigen_diff<std::remove_reference<T>::type::RowsAtCompileTime, Row_Idx::value_at_compile_time>::value, //
+                Col_Idx::value_at_compile_time                                                                        //
+                >(mat.rows() - row_idx.value(), col_idx.value())),
+
+        eigen::as_mut_view(
+            mat.template bottomRightCorner<                                                                           //
+                eigen_diff<std::remove_reference<T>::type::RowsAtCompileTime, Row_Idx::value_at_compile_time>::value, //
+                eigen_diff<std::remove_reference<T>::type::ColsAtCompileTime, Col_Idx::value_at_compile_time>::value  //
+                >(mat.rows() - row_idx.value(), mat.cols() - col_idx.value()))
+
+            ));
 
 // clang-format off
 template <typename T> auto rows(T const& mat) -> row_kind<T> { return row_kind<T>{mat.rows()}; }

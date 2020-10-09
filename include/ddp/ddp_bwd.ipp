@@ -20,7 +20,7 @@ auto ddp_solver_t<Problem>::
 {
   // clang-format on
   bool success = false;
-  auto ctrl_fb = control_feedback_t{u_idx, model};
+  auto ctrl_fb = control_feedback_t{u_idx, prob};
 
   // TODO preallocate V_{x,xx}, Q_{x,u,xx,ux,uu}
   while (not success) {
@@ -28,9 +28,9 @@ auto ddp_solver_t<Problem>::
     auto V_x = derivatives.lfx.transpose().eval();
     auto const v_x = eigen::as_const_view(V_x);
 
-    for (auto zipped :    //
-         ranges::reverse( //
-             ranges::zip(
+    for (auto zipped :             //
+         ranges::reverse(          //
+             ranges::zip(          //
                  current_traj,     //
                  derivatives.l(),  //
                  derivatives.f(),  //
@@ -76,7 +76,7 @@ auto ddp_solver_t<Problem>::
 
       auto Q_uu         = l.uu.eval();                            auto Q_uu_v = eigen::as_mut_view(Q_uu);
       Q_uu_v.noalias() += f.u.transpose() * V_xx * f.u;
-      Q_uu_v.noalias() += mu * (eq.u.transpose() * eq.u);
+      Q_uu_v.noalias() +=  (eq.u.transpose() * eq.u).operator*(mu); // *see below for reason
       eq.uu.noalias_contract_add_outdim(Q_uu_v, tmp);
       f .uu.noalias_contract_add_outdim(Q_uu_v, v_x);
 
@@ -86,6 +86,18 @@ auto ddp_solver_t<Problem>::
       eq.ux.noalias_contract_add_outdim(Q_ux_v, tmp);
       f .ux.noalias_contract_add_outdim(Q_ux_v, v_x);
       // clang-format on
+
+      /* *
+       * when scalar_t is boost::multiprecision::big_float
+       * and du has size 1 at compile time
+       *
+       * => eq.u.transpose() * eq.u() has shape [1, 1]
+       * => eq.u.transpose() * eq.u() is convertible to scalar_t
+       * => mu * (eq.u.transpose() * eq.u())
+       *     --^--
+       *  boost::multiprecision::operator*
+       * => results in scalar_t instead of matrix
+       */
 
       auto I_u = decltype(Q_uu)::Identity(Q_uu.rows(), Q_uu.rows());
 
@@ -100,6 +112,22 @@ auto ddp_solver_t<Problem>::
         fmt::print("mu : {}\n", mu);
         fmt::print("reg: {}\n", regularization);
         fmt::print("Quu:\n{}\n\n", Q_uu);
+        fmt::print("Vxx:\n{}\n\n", V_xx);
+        fmt::print("fu.T Vxx fu:\n{}\n\n", f.u.transpose() * V_xx * f.u);
+        fmt::print("mu * eq_u.T eq_u\n{}\n\n", (eq.u.transpose() * eq.u).operator*(mu));
+
+        auto Q_uu_ = Q_uu;
+        auto Q_uu_v_ = eigen::as_mut_view(Q_uu_);
+        {
+          Q_uu_.setZero();
+          eq.uu.noalias_contract_add_outdim(Q_uu_v_, tmp);
+          fmt::print("(p + mu eq).T eq_uu:\n{}\n\n", Q_uu);
+        }
+        {
+          Q_uu_.setZero();
+          f.uu.noalias_contract_add_outdim(Q_uu_v_, v_x);
+          fmt::print("vx.T f_uu:\n{}\n\n", Q_uu);
+        }
         break;
       }
 

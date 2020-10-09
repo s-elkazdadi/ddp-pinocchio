@@ -48,17 +48,12 @@ struct solver_parameters_t {
   Scalar n;
 };
 
-template <typename First, typename Second>
-struct pair {
-  First first;
-  Second second;
-};
-
-template <typename Scalar, typename Control_Idx, typename Eq_Idx, typename D_State_Idx>
+template <typename Scalar, typename Control_Idx, typename Eq_Idx, typename State_Idx, typename D_State_Idx>
 struct derivative_storage_t {
   using scalar_t = Scalar;
   using control_indexer_t = Control_Idx;
   using eq_indexer_t = Eq_Idx;
+  using state_indexer_t = State_Idx;
   using dstate_indexer_t = D_State_Idx;
   using lfx_t = eigen::matrix_t<
       scalar_t,
@@ -78,7 +73,7 @@ struct derivative_storage_t {
 
   template <typename L, typename R>
   using prod_t = typename indexing::outer_prod_result<L, R>::type;
-  using one_idx_t = indexing::regular_indexer_t<fix_index<1>, fix_index<1>, fix_index<1>, fix_index<1>>;
+  using one_idx_t = indexing::regular_indexer_t<fix_index<1>>;
   template <typename Idx>
   using mat_seq_t = detail::matrix_seq::mat_seq_t<scalar_t, Idx>;
   template <typename O, typename L, typename R>
@@ -94,6 +89,7 @@ struct derivative_storage_t {
     mat_seq_t<prod_t<control_indexer_t, dstate_indexer_t>>                lux;
     mat_seq_t<prod_t<control_indexer_t, control_indexer_t>>               luu;
 
+    mat_seq_t       <state_indexer_t>                                     f_val;
     mat_seq_t<prod_t<dstate_indexer_t, dstate_indexer_t>>                 fx;
     mat_seq_t<prod_t<dstate_indexer_t, control_indexer_t>>                fu;
     tensor_seq_t<dstate_indexer_t, dstate_indexer_t, dstate_indexer_t>    fxx;
@@ -302,7 +298,7 @@ struct no_multiplier_feedback_t {
 
 template <typename Problem>
 struct ddp_solver_t {
-  using model_t = typename Problem::model_t;
+  using problem_t = Problem;
   using scalar_t = typename Problem::scalar_t;
   using state_indexer_t = typename Problem::state_indexer_t;
   using dstate_indexer_t = typename Problem::dstate_indexer_t;
@@ -321,12 +317,12 @@ struct ddp_solver_t {
   };
   template <typename Dummy>
   struct multiplier_sequence_impl<fn_kind::constant, Dummy> {
-    using eq_type = detail::matrix_seq::constant_vector_function_seq_t<model_t, scalar_t, eq_indexer_t>;
+    using eq_type = detail::matrix_seq::constant_vector_function_seq_t<problem_t, eq_indexer_t>;
     struct type {
       eq_type eq;
     };
-    static auto zero(eq_indexer_t const& eq_idx, model_t const& model) -> type {
-      (void)model;
+    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob) -> type {
+      (void)prob;
       auto multipliers = type{eq_type{eq_idx.clone()}};
       for (auto e : multipliers.eq) {
         e.val().setZero();
@@ -336,18 +332,15 @@ struct ddp_solver_t {
   };
   template <typename Dummy>
   struct multiplier_sequence_impl<fn_kind::affine, Dummy> {
-    using eq_type = detail::matrix_seq::affine_vector_function_seq_t<model_t, scalar_t, eq_indexer_t>;
+    using eq_type = detail::matrix_seq::affine_vector_function_seq_t<problem_t, eq_indexer_t>;
     struct type {
       eq_type eq;
     };
-    static auto zero(eq_indexer_t const& eq_idx, model_t const& model) -> type {
-      auto multipliers = type{eq_type{eq_idx.clone(), model}};
+    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob) -> type {
+      auto multipliers = type{eq_type{eq_idx.clone(), prob}};
       for (auto e : multipliers.eq) {
-        auto q = multipliers.eq.config_part(e.origin());
-        auto v = multipliers.eq.vel_part(e.origin());
 
-        model.neutral_configuration(eigen::as_mut_view(q));
-        v.setZero();
+        prob.neutral_configuration(eigen::as_mut_view(e.origin()));
         e.val().setZero();
         e.jac().setZero();
       }
@@ -362,8 +355,8 @@ struct ddp_solver_t {
                                      ? fn_kind::constant                         //
                                      : fn_kind::affine;                          //
     using type = typename multiplier_sequence_impl<K>::type;
-    static auto zero(eq_indexer_t const& eq_idx, model_t const& model) -> type {
-      return multiplier_sequence_impl<K>::zero(eq_idx, model);
+    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob) -> type {
+      return multiplier_sequence_impl<K>::zero(eq_idx, prob);
     }
   };
 
@@ -371,12 +364,12 @@ struct ddp_solver_t {
   struct multiplier_feedback_sequence {
     static constexpr fn_kind K = M == method::primal ? fn_kind::zero : fn_kind::affine;
     using type = typename multiplier_sequence_impl<K>::type;
-    static auto zero(eq_indexer_t const& eq_idx, model_t const& model) -> type {
-      return multiplier_sequence_impl<K>::zero(eq_idx, model);
+    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob) -> type {
+      return multiplier_sequence_impl<K>::zero(eq_idx, prob);
     }
   };
 
-  using control_feedback_t = detail::matrix_seq::affine_vector_function_seq_t<model_t, scalar_t, control_indexer_t>;
+  using control_feedback_t = detail::matrix_seq::affine_vector_function_seq_t<problem_t, control_indexer_t>;
 
   template <method M>
   struct backward_pass_result_t {
@@ -387,12 +380,12 @@ struct ddp_solver_t {
 
   template <method M>
   auto zero_multipliers() const -> typename multiplier_sequence<M>::type {
-    return multiplier_sequence<M>::zero(eq_idx, model);
+    return multiplier_sequence<M>::zero(eq_idx, prob);
   }
 
   template <method M>
   auto zero_feedback_multipliers() const -> typename multiplier_feedback_sequence<M>::type {
-    return multiplier_sequence<M>::zero(eq_idx, model);
+    return multiplier_sequence<M>::zero(eq_idx, prob);
   }
 
   template <typename Control_Gen>
@@ -423,14 +416,15 @@ struct ddp_solver_t {
   template <typename Idx>
   using mat_seq_t = detail::matrix_seq::mat_seq_t<scalar_t, Idx>;
 
-  using one_idx_t = indexing::regular_indexer_t<fix_index<1>, fix_index<1>, fix_index<1>, fix_index<1>>;
+  using one_idx_t = indexing::regular_indexer_t<fix_index<1>>;
   template <typename L, typename R>
   using prod_t = typename indexing::outer_prod_result<L, R>::type;
 
   template <typename O, typename L, typename R>
   using tensor_seq_t = detail::matrix_seq::tensor_seq_t<scalar_t, indexing::tensor_indexer_t<O, L, R>>;
 
-  using derivative_storage_t = ddp::derivative_storage_t<scalar_t, control_indexer_t, eq_indexer_t, dstate_indexer_t>;
+  using derivative_storage_t =
+      ddp::derivative_storage_t<scalar_t, control_indexer_t, eq_indexer_t, state_indexer_t, dstate_indexer_t>;
 
   auto uninit_derivative_storage() const -> derivative_storage_t {
 
@@ -438,7 +432,7 @@ struct ddp_solver_t {
     index_t e = this->index_end();
     auto one_idx = indexing::vec_regular_indexer(b, e, fix_index<1>{});
 
-    index_t dim_xf = model.tangent_dim() + model.tangent_dim();
+    index_t dim_xf = prob.dstate_dim();
 
     typename derivative_storage_t::lfx_t lfx(1, dim_xf);
     typename derivative_storage_t::lfxx_t lfxx(dim_xf, dim_xf);
@@ -461,6 +455,7 @@ struct ddp_solver_t {
         m::mat_seq<scalar_t>(indexing::outer_prod(u_idx, x_idx)),
         m::mat_seq<scalar_t>(indexing::outer_prod(u_idx, u_idx)),
         // transition function
+        m::mat_seq<scalar_t>(x_idx),
         m::mat_seq<scalar_t>(indexing::outer_prod(x_idx, x_idx)),
         m::mat_seq<scalar_t>(indexing::outer_prod(x_idx, u_idx)),
         m::tensor_seq<scalar_t>(indexing::tensor_indexer(x_idx, x_idx, x_idx)),
@@ -667,6 +662,10 @@ struct ddp_solver_t {
       scalar_t const& mu,
       scalar_t const& w,
       scalar_t const& n) const -> mult_update_attempt_result_e {
+    fmt::string_view name = prob.name();
+    log_file_t primal_log{("/tmp/" + std::string{name.begin(), name.end()} + "_primal.dat").c_str()};
+    log_file_t dual_log{("/tmp/" + std::string{name.begin(), name.end()} + "_dual.dat").c_str()};
+
     prob.compute_derivatives(derivatives, traj);
 
     mults.eq.update_origin(traj.m_state_data);
@@ -675,7 +674,11 @@ struct ddp_solver_t {
     auto opt_obj = optimality_obj(traj, mults, mu, derivatives);
     auto opt_constr = optimality_constr(derivatives);
 
+    fmt::print(primal_log.ptr, "{}\n", opt_constr);
+    fmt::print(dual_log.ptr, "{}\n", opt_obj);
+
     fmt::print(
+        stdout,
         "opt obj: {}\n"
         "opt constr: {}\n",
         opt_obj,
@@ -683,10 +686,13 @@ struct ddp_solver_t {
 
     if (opt_obj < w) {
       if (opt_constr < n) {
-        for (auto zipped : ranges::zip(mults.eq, derivatives.eq(), fb_seq)) {
+
+        for (auto zipped : ranges::zip( //
+                 mults.eq,              //
+                 derivatives.eq(),      //
+                 fb_seq)) {
           DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
 
-          // TODO: line search
           p_eq.val() += mu * (eq.val + eq.u * fb.val());
           p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
         }
@@ -751,10 +757,10 @@ struct ddp_solver_t {
       Update_Strategy const&         update_strategy,
       solver_parameters_t<scalar_t>  solver_parameters,
       trajectory_t                   initial_trajectory
-  ) const -> pair<trajectory_t, control_feedback_t> {
+  ) const -> detail::tuple<trajectory_t, control_feedback_t> {
     detail::unused(logger, update_strategy, solver_parameters, initial_trajectory);
     // clang-format on
-    std::terminate();
+    DDP_ASSERT_MSG("unimplemented", false);
   }
 
   // clang-format off
@@ -776,7 +782,6 @@ struct ddp_solver_t {
       bool                                            do_linesearch = true
   ) const -> scalar_t;
 
-  model_t const&                          model;
   Problem const&                          prob;
   control_indexer_t                       u_idx;
   eq_indexer_t                            eq_idx;

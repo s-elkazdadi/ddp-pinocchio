@@ -8,9 +8,9 @@
 
 DOCTEST_TEST_CASE("matrix sequence") {
   using namespace ddp;
-  auto reg = indexing::vec_regular_indexer(0, 12, fix_index<3>{}, fix_index<3>{});
-  auto reg2 = indexing::vec_regular_indexer(0, 12, dyn_index{2}, fix_index<3>{});
-  auto reg3 = indexing::vec_regular_indexer(0, 12, dyn_index{3}, fix_index<4>{});
+  auto reg = indexing::vec_regular_indexer(0, 12, fix_index<3>{});
+  auto reg2 = indexing::vec_regular_indexer(0, 12, dyn_index{2});
+  auto reg3 = indexing::vec_regular_indexer(0, 12, fix_index<3>{});
 
   auto filtered = indexing::periodic_row_filter(reg, 3, 2);
   auto filtered2 = indexing::periodic_row_filter(reg3, 2, 1);

@@ -7,7 +7,7 @@
 using scalar_t =                                                        //
     boost::multiprecision::number<                                      //
         boost::multiprecision::mpfr_float_backend<                      //
-            500,                                                        //
+            1000,                                                        //
             boost::multiprecision::mpfr_allocation_type::allocate_stack //
             >,                                                          //
         boost::multiprecision::et_off>;
@@ -54,8 +54,6 @@ DOCTEST_TEST_CASE("affine-function") {
   using namespace ddp;
   using eigen::as_const_view;
   using eigen::as_mut_view;
-  using eigen::dyn_cols;
-  using eigen::dyn_rows;
 
   using vec_t = Eigen::Matrix<scalar_t, Eigen::Dynamic, 1>;
   using rvec_t = Eigen::Matrix<scalar_t, 1, Eigen::Dynamic>;

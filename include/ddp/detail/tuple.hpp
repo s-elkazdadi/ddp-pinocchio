@@ -40,6 +40,11 @@ struct tuple {
   tuple(Ts... args) noexcept : _m_impl{static_cast<Ts&&>(args)...} {}
 };
 
+template <typename... Ts>
+auto make_tuple(Ts... args) -> tuple<Ts...> {
+  return {DDP_MOVE(args)...};
+}
+
 template <index_t I, typename... Ts>
 auto get(tuple<Ts...>& tup) noexcept -> decltype(detail::get_mut<I>(tup._m_impl)) {
   return detail::get_mut<I>(tup._m_impl);

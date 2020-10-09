@@ -28,6 +28,11 @@ auto ddp_solver_t<Problem>::
 
   scalar_t step = 1;
   bool success = false;
+
+  auto tmp = eigen::matrix_from_idx_t<scalar_t, dstate_indexer_t>{
+      prob.dstate_dim(),
+  };
+
   while (not success) {
     if (step < 1e-10) {
       break;
@@ -37,10 +42,13 @@ auto ddp_solver_t<Problem>::
       DDP_BIND(auto&&, (xu_new, xu_old, fb), zipped);
       index_t t = xu_new.current_index();
 
+      auto xu_new_c = xu_new.as_const();
+
+      prob.difference(eigen::as_mut_view(tmp), xu_old.x(), xu_new_c.x());
+
       xu_new.u() = xu_old.u()        //
                    + step * fb.val() //
-                   + fb.jac() * (xu_new.x() - xu_old.x());
-      auto xu_new_c = xu_new.as_const();
+                   + fb.jac() * tmp;
       prob.eval_f_to(xu_new.x_next(), t, xu_new_c.x(), xu_new_c.u());
     }
 

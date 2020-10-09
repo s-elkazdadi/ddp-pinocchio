@@ -246,44 +246,27 @@ public:
   using proxy_t = typename _::begin_end_impl<outer_product_indexer_t>::proxy_t;
 };
 
-template <typename Rows, typename Cols = fix_index<1>, typename Max_Rows = Rows, typename Max_Cols = Cols>
+template <typename Rows, typename Cols = fix_index<1>>
 struct regular_indexer_t {
   static_assert(DDP_INDEX_CONCEPT(Rows), "");
   static_assert(DDP_INDEX_CONCEPT(Cols), "");
-  static_assert(not Rows::known_at_compile_time or detail::check_eq<Rows, Max_Rows>::value == detail::yes, "");
-  static_assert(not Cols::known_at_compile_time or detail::check_eq<Cols, Max_Cols>::value == detail::yes, "");
 
   using row_kind = Rows;
   using col_kind = Cols;
 
-  using max_row_kind = Max_Rows;
-  using max_col_kind = Max_Cols;
+  using max_row_kind = Rows;
+  using max_col_kind = Cols;
 
   static constexpr bool random_access = true;
 
   row_kind m_rows;
   col_kind m_cols;
-  max_row_kind m_max_rows;
-  max_col_kind m_max_cols;
   index_t m_begin;
   index_t m_end;
 
-  regular_indexer_t(
-      index_t begin, index_t end, row_kind rows, col_kind cols, max_row_kind max_rows, max_col_kind max_cols) noexcept
-      : m_rows{rows}, m_cols{cols}, m_max_rows{max_rows}, m_max_cols{max_cols}, m_begin{begin}, m_end{end} {
-    detail::assert_leq(m_rows, m_max_rows);
-    detail::assert_leq(m_cols, m_max_cols);
+  regular_indexer_t(index_t begin, index_t end, row_kind rows, col_kind cols) noexcept
+      : m_rows{rows}, m_cols{cols}, m_begin{begin}, m_end{end} {
     assert(begin < end);
-    if (not Max_Rows::known_at_compile_time) {
-      assert(m_rows.value() == m_max_rows.value());
-    } else {
-      assert(m_rows.value() <= m_max_rows.value());
-    }
-    if (not Max_Cols::known_at_compile_time) {
-      assert(m_cols.value() == m_max_cols.value());
-    } else {
-      assert(m_cols.value() <= m_max_cols.value());
-    }
   }
 
   auto clone() const noexcept -> regular_indexer_t { return *this; }
@@ -298,11 +281,86 @@ struct regular_indexer_t {
   auto rows(index_t) const noexcept -> row_kind { return m_rows; };
   auto cols(index_t) const noexcept -> col_kind { return m_cols; };
 
-  auto max_rows() const noexcept -> max_row_kind { return m_max_rows; };
-  auto max_cols() const noexcept -> max_col_kind { return m_max_cols; };
+  auto max_rows() const noexcept -> max_row_kind { return m_rows; };
+  auto max_cols() const noexcept -> max_col_kind { return m_cols; };
 
   using iterator = typename _::begin_end_impl<regular_indexer_t>::iterator;
   using proxy_t = typename _::begin_end_impl<regular_indexer_t>::proxy_t;
+};
+
+inline auto clamp(index_t x, index_t const low, index_t const high) -> index_t {
+  return (x < low) //
+             ? low
+             : ((x > high) //
+                    ? high
+                    : x);
+}
+
+template <typename Indexer>
+struct range_row_filter_t {
+  static_assert(detail::check_eq<typename Indexer::col_kind, fix_index<1>>::value == detail::yes, "");
+  static_assert(detail::check_eq<typename Indexer::max_col_kind, fix_index<1>>::value == detail::yes, "");
+
+  using row_kind = dyn_index;
+  using col_kind = fix_index<1>;
+
+  using max_row_kind = typename Indexer::max_row_kind;
+  using max_col_kind = fix_index<1>;
+
+  static constexpr bool random_access = Indexer::random_access;
+
+  Indexer m_idx;
+  index_t m_range_begin;
+  index_t m_range_end;
+  index_t m_required_memory;
+
+private:
+  range_row_filter_t(Indexer idx, index_t range_begin, index_t range_end, index_t required_memory) noexcept
+      : m_idx{DDP_MOVE(idx)}, m_range_begin{range_begin}, m_range_end{range_end}, m_required_memory{required_memory} {}
+
+public:
+  range_row_filter_t(Indexer idx, index_t range_begin, index_t range_end) noexcept
+      : m_idx{DDP_MOVE(idx)}, m_range_begin{range_begin}, m_range_end{range_end}, m_required_memory{0} {
+    for (index_t t = std::max(this->index_begin(), m_range_begin); t < std::min(this->index_end(), m_range_end); ++t) {
+      m_required_memory += this->stride(t);
+    }
+  }
+
+  auto clone() const noexcept(noexcept(m_idx.clone())) -> range_row_filter_t {
+    return {m_idx.clone(), m_range_begin, m_range_end, m_required_memory};
+  }
+
+  auto index_begin() const noexcept -> index_t { return m_idx.index_begin(); }
+  auto index_end() const noexcept -> index_t { return m_idx.index_end(); }
+
+  auto stride(index_t t) const -> index_t { return (rows(t) * cols(t)).value(); }
+  auto stride_n(index_t t, index_t n) const noexcept -> index_t {
+    assert(n >= 0);
+    index_t begin = clamp(t, m_range_begin, m_range_end);
+    index_t end = clamp(t + n, m_range_begin, m_range_end);
+#ifndef NDEBUG
+    auto result = 0;
+    for (index_t i = 0; i < n; ++i) {
+      result += stride(t + i);
+    }
+#endif
+    assert(result == m_idx.stride_n(begin, end - begin));
+    return m_idx.stride_n(begin, end - begin);
+  };
+
+  auto required_memory() const noexcept -> index_t { return m_required_memory; }
+  auto unfiltered_rows(index_t t) const noexcept -> typename Indexer::row_kind { return m_idx.rows(t); }
+
+  auto rows(index_t t) const noexcept -> row_kind {
+    return (t >= m_range_begin and t < m_range_end) ? unfiltered_rows(t) : dyn_index{0};
+  }
+  auto cols(index_t) const noexcept -> col_kind { return {}; }
+
+  auto max_rows() const noexcept -> max_row_kind { return m_idx.max_rows(); };
+  auto max_cols() const noexcept -> max_col_kind { return fix_index<1>{}; };
+
+  using iterator = typename _::begin_end_impl<range_row_filter_t>::iterator;
+  using proxy_t = typename _::begin_end_impl<range_row_filter_t>::proxy_t;
 };
 
 template <typename Indexer>
@@ -349,7 +407,7 @@ public:
 
   auto unfiltered_rows(index_t t) const noexcept -> typename Indexer::row_kind { return m_idx.rows(t); }
   auto rows(index_t t) const noexcept -> row_kind {
-    return ((t - m_idx.index_begin()) % m_period == m_first_offset) ? row_kind{unfiltered_rows(t)} : row_kind{0};
+    return ((t - m_idx.index_begin()) % m_period == m_first_offset) ? dyn_index{unfiltered_rows(t)} : dyn_index{0};
   }
   auto cols(index_t) const noexcept -> col_kind { return {}; }
 
@@ -366,19 +424,17 @@ struct outer_prod_result {
   static auto construct(Idx_L idx_l, Idx_R idx_r) noexcept -> type { return {DDP_MOVE(idx_l), DDP_MOVE(idx_r)}; }
 };
 
-template <typename Rows_L, typename Max_Rows_L, typename Rows_R, typename Max_Rows_R>
-struct outer_prod_result<
-    regular_indexer_t<Rows_L, fix_index<1>, Max_Rows_L, fix_index<1>>,
-    regular_indexer_t<Rows_R, fix_index<1>, Max_Rows_R, fix_index<1>>> {
+template <typename Rows_L, typename Rows_R>
+struct outer_prod_result<regular_indexer_t<Rows_L, fix_index<1>>, regular_indexer_t<Rows_R, fix_index<1>>> {
 
-  using idx_left_t = regular_indexer_t<Rows_L, fix_index<1>, Max_Rows_L, fix_index<1>>;
-  using idx_right_t = regular_indexer_t<Rows_R, fix_index<1>, Max_Rows_R, fix_index<1>>;
-  using type = regular_indexer_t<Rows_L, Rows_R, Max_Rows_L, Max_Rows_R>;
+  using idx_left_t = regular_indexer_t<Rows_L, fix_index<1>>;
+  using idx_right_t = regular_indexer_t<Rows_R, fix_index<1>>;
+  using type = regular_indexer_t<Rows_L, Rows_R>;
 
   static auto construct(idx_left_t idx_l, idx_right_t idx_r) noexcept -> type {
     assert(idx_l.index_begin() == idx_r.index_begin());
     assert(idx_l.index_end() == idx_r.index_end());
-    return {idx_l.index_begin(), idx_l.index_end(), idx_l.m_rows, idx_r.m_rows, idx_l.m_max_rows, idx_r.m_max_rows};
+    return {idx_l.index_begin(), idx_l.index_end(), idx_l.m_rows, idx_r.m_rows};
   }
 };
 
@@ -398,28 +454,13 @@ auto periodic_row_filter(Idx idx, index_t period, index_t first_offset) noexcept
 }
 
 template <typename Rows, typename Cols>
-auto mat_regular_indexer(index_t begin, index_t end, Rows rows, Cols cols) noexcept
-    -> regular_indexer_t<Rows, Cols, Rows, Cols> {
-  return {begin, end, rows, cols, rows, cols};
-}
-
-template <typename Rows, typename Cols, typename Max_Rows, typename Max_Cols>
-auto mat_regular_indexer(
-    index_t begin, index_t end, Rows rows, Cols cols, Max_Rows max_rows, Max_Cols max_cols) noexcept
-    -> regular_indexer_t<Rows, Cols, Max_Rows, Max_Cols> {
-  return {begin, end, rows, cols, max_rows, max_cols};
+auto mat_regular_indexer(index_t begin, index_t end, Rows rows, Cols cols) noexcept -> regular_indexer_t<Rows, Cols> {
+  return {begin, end, rows, cols};
 }
 
 template <typename Rows>
-auto vec_regular_indexer(index_t begin, index_t end, Rows rows) noexcept
-    -> regular_indexer_t<Rows, fix_index<1>, Rows, fix_index<1>> {
-  return {begin, end, rows, fix_index<1>{}, rows, fix_index<1>{}};
-}
-
-template <typename Rows, typename Max_Rows>
-auto vec_regular_indexer(index_t begin, index_t end, Rows rows, Max_Rows max_rows) noexcept
-    -> regular_indexer_t<Rows, fix_index<1>, Max_Rows, fix_index<1>> {
-  return {begin, end, rows, fix_index<1>{}, max_rows, fix_index<1>{}};
+auto vec_regular_indexer(index_t begin, index_t end, Rows rows) noexcept -> regular_indexer_t<Rows, fix_index<1>> {
+  return {begin, end, rows, fix_index<1>{}};
 }
 
 } // namespace indexing
