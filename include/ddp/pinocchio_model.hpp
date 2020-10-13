@@ -38,8 +38,6 @@ private:
   template <index_t Rows, index_t Cols = 1>
   using row_major_const_view_t = eigen::view_t<Eigen::Matrix<scalar_t, Rows, Cols, Eigen::RowMajor> const>;
 
-  auto get_data() const noexcept -> impl_data_t*;
-
   template <typename Model_Builder>
   model_t(Model_Builder&& model_builder, index_t n_parallel) noexcept(false);
 
@@ -63,10 +61,23 @@ private:
       fmt::string_view name2  //
   ) const noexcept;
   template <typename Out, typename In>
-  void
-  d_integrate_transport_dq_or_dv(Out out_J, In in_J, const_view_t<Nq> q, const_view_t<Nv> v, bool dq) const noexcept;
+  void d_integrate_transport_dq_or_dv(Out out_J, In in_J, const_view_t<Nq> q, const_view_t<Nv> v, bool dq) const
+      noexcept;
 
 public:
+  struct key {
+    key(key const&) = delete;
+    key(key&& other) noexcept : m_parent{other.m_parent} { other.m_parent = nullptr; }
+    auto operator=(key const&) -> key& = delete;
+    auto operator=(key&& other) -> key& = delete;
+    ~key();
+
+  private:
+    friend struct model_t;
+    explicit key(impl_data_t& ref) : m_parent{&ref} {};
+    impl_data_t* m_parent;
+  };
+
   ~model_t() noexcept;
   model_t(model_t const&) = delete;
   model_t(model_t&&) noexcept;
@@ -88,6 +99,8 @@ public:
   auto tangent_dim_c() const noexcept -> DDP_CONDITIONAL(fixed_size, fix_index<Nv>, dyn_index) {
     return DDP_CONDITIONAL(fixed_size, fix_index<Nv>, dyn_index){m_tangent_dim};
   }
+
+  auto acquire_workspace() const noexcept -> key;
 
   void neutral_configuration(mut_view_t<Nq> out_q) const noexcept;
   void random_configuration(mut_view_t<Nq> out_q) const noexcept;

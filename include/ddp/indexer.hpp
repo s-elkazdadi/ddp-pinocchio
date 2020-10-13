@@ -81,26 +81,28 @@ struct indexer_iter_t {
 
   indexer_iter_t(Indexer_Ref indexer, index_t current_index, index_t memory_offset) noexcept
       : m_indexer{indexer}, m_current_index{current_index}, m_memory_offset{memory_offset} {
-    assert(m_current_index <= m_indexer->index_end());
-    assert(m_current_index >= m_indexer->index_begin());
-    assert(m_memory_offset >= 0);
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", m_current_index <= m_indexer->index_end()),
+        ("", m_current_index >= m_indexer->index_begin()),
+        ("", m_memory_offset >= 0));
   }
 
   auto operator++() noexcept -> indexer_iter_t& {
-    assert(m_current_index + 1 <= m_indexer->index_end());
+    DDP_ASSERT(m_current_index + 1 <= m_indexer->index_end());
     m_memory_offset += m_indexer->stride(m_current_index);
     ++m_current_index;
     return *this;
   }
   auto operator--() noexcept -> indexer_iter_t& {
-    assert(m_current_index - 1 >= m_indexer->index_begin());
+    DDP_ASSERT(m_current_index - 1 >= m_indexer->index_begin());
     --m_current_index;
     m_memory_offset -= m_indexer->stride(m_current_index);
     return *this;
   }
   auto operator+=(std::ptrdiff_t n) noexcept -> indexer_iter_t& {
-    assert(m_current_index + n <= m_indexer->index_end());
-    assert(m_current_index + n >= m_indexer->index_begin());
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", m_current_index + n <= m_indexer->index_end()),
+        ("", m_current_index + n >= m_indexer->index_begin()));
     m_current_index += n;
     if (n >= 0) {
       m_memory_offset += m_indexer->stride_n(m_current_index, n);
@@ -110,15 +112,15 @@ struct indexer_iter_t {
     return *this;
   }
   friend auto operator==(indexer_iter_t a, indexer_iter_t b) noexcept -> bool {
-    assert(a.m_indexer == b.m_indexer);
+    DDP_ASSERT((a.m_indexer == b.m_indexer));
     return a.m_current_index == b.m_current_index;
   }
   friend auto operator-(indexer_iter_t b, indexer_iter_t a) -> std::ptrdiff_t {
-    assert(b.m_indexer == a.m_indexer);
+    DDP_ASSERT((a.m_indexer == b.m_indexer));
     return b.m_current_index - a.m_current_index;
   }
   auto operator*() const noexcept -> proxy_t {
-    assert(m_current_index != m_indexer->index_end());
+    DDP_ASSERT(m_current_index != m_indexer->index_end());
     return {m_indexer, m_current_index, m_memory_offset};
   }
 
@@ -166,8 +168,9 @@ struct row_concat_indexer_t {
   Idx_R m_idx_r;
 
   row_concat_indexer_t(Idx_L l, Idx_R r) : m_idx_l{DDP_MOVE(l)}, m_idx_r{DDP_MOVE(r)} {
-    assert(m_idx_l.index_begin() == m_idx_r.index_begin());
-    assert(m_idx_l.index_end() == m_idx_r.index_end());
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", m_idx_l.index_begin() == m_idx_r.index_begin()),
+        ("", m_idx_l.index_end() == m_idx_r.index_end()));
     for (index_t t = this->index_begin(); t < this->index_end(); ++t) {
       detail::assert_eq(m_idx_l.cols(t), m_idx_r.cols(t));
     }
@@ -218,8 +221,9 @@ private:
 public:
   outer_product_indexer_t(Idx_L l, Idx_R r) noexcept
       : m_idx_l{DDP_MOVE(l)}, m_idx_r{DDP_MOVE(r)}, m_required_memory{0} {
-    assert(m_idx_l.index_begin() == m_idx_r.index_begin());
-    assert(m_idx_l.index_end() == m_idx_r.index_end());
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", m_idx_l.index_begin() == m_idx_r.index_begin()),
+        ("", m_idx_l.index_end() == m_idx_r.index_end()));
 
     for (index_t t = this->index_begin(); t < this->index_end(); ++t) {
       m_required_memory += this->stride(t);
@@ -266,7 +270,7 @@ struct regular_indexer_t {
 
   regular_indexer_t(index_t begin, index_t end, row_kind rows, col_kind cols) noexcept
       : m_rows{rows}, m_cols{cols}, m_begin{begin}, m_end{end} {
-    assert(begin < end);
+    DDP_ASSERT(begin < end);
   }
 
   auto clone() const noexcept -> regular_indexer_t { return *this; }
@@ -364,16 +368,14 @@ public:
 
   auto stride(index_t t) const -> index_t { return (rows(t) * cols(t)).value(); }
   auto stride_n(index_t t, index_t n) const noexcept -> index_t {
-    assert(n >= 0);
+    DDP_ASSERT(n >= 0);
     index_t begin = clamp(t, m_range_begin, m_range_end);
     index_t end = clamp(t + n, m_range_begin, m_range_end);
-#ifndef NDEBUG
     auto result = 0;
     for (index_t i = 0; i < n; ++i) {
       result += stride(t + i);
     }
-#endif
-    assert(result == m_idx.stride_n(begin, end - begin));
+    DDP_ASSERT(result == m_idx.stride_n(begin, end - begin));
     return m_idx.stride_n(begin, end - begin);
   };
 
@@ -417,8 +419,9 @@ private:
 public:
   periodic_row_filter_t(Indexer idx, index_t period, index_t first_offset) noexcept
       : m_idx{DDP_MOVE(idx)}, m_period{period}, m_first_offset{first_offset}, m_required_memory{0} {
-    assert(period > 0);
-    assert(first_offset < period);
+    DDP_ASSERT_MSG_ALL_OF( //
+        ("", period > 0),
+        ("", first_offset < period));
     for (index_t t = this->index_begin(); t < this->index_end(); ++t) {
       m_required_memory += this->stride(t);
     }
@@ -461,8 +464,9 @@ struct outer_prod_result<regular_indexer_t<Rows_L, fix_index<1>>, regular_indexe
   using type = regular_indexer_t<Rows_L, Rows_R>;
 
   static auto construct(idx_left_t idx_l, idx_right_t idx_r) noexcept -> type {
-    assert(idx_l.index_begin() == idx_r.index_begin());
-    assert(idx_l.index_end() == idx_r.index_end());
+    DDP_ASSERT_MSG_ALL_OF(
+        ("", idx_l.index_begin() == idx_r.index_begin()),
+        ("", idx_l.index_end() == idx_r.index_end()));
     return {idx_l.index_begin(), idx_l.index_end(), idx_l.m_rows, idx_r.m_rows};
   }
 };

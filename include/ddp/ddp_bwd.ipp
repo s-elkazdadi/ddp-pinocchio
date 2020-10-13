@@ -28,6 +28,8 @@ auto ddp_solver_t<Problem>::
     auto V_x = derivatives.lfx.transpose().eval();
     auto const v_x = eigen::as_const_view(V_x);
 
+    scalar_t expected_decrease = 0;
+
     for (auto zipped :             //
          ranges::reverse(          //
              ranges::zip(          //
@@ -51,10 +53,11 @@ auto ddp_solver_t<Problem>::
 
       {
         using std::isfinite;
-        assert(isfinite(mu));
-        assert(not pe.hasNaN());
-        assert(not pe_x.hasNaN());
-        assert(eq_mult.origin() == xu.x());
+        DDP_ASSERT_MSG_ALL_OF(
+            ("", isfinite(mu)),
+            ("", not pe.hasNaN()),
+            ("", not pe_x.hasNaN()),
+            ("", eq_mult.origin() == xu.x()));
       }
 
       // clang-format off
@@ -71,23 +74,23 @@ auto ddp_solver_t<Problem>::
       Q_xx_v.noalias() += f.x.transpose() * V_xx * f.x;
       Q_xx_v.noalias() += eq.x.transpose() * tmp2;
       Q_xx_v.noalias() += pe_x.transpose() * eq.x;
-      eq.xx.noalias_contract_add_outdim(Q_xx_v, tmp);
+      eq.xx.noalias_contract_add_outdim(Q_xx_v, pe);
       f .xx.noalias_contract_add_outdim(Q_xx_v, v_x);
 
       auto Q_uu         = l.uu.eval();                            auto Q_uu_v = eigen::as_mut_view(Q_uu);
       Q_uu_v.noalias() += f.u.transpose() * V_xx * f.u;
       Q_uu_v.noalias() +=  (eq.u.transpose() * eq.u).operator*(mu); // *see below for reason
-      eq.uu.noalias_contract_add_outdim(Q_uu_v, tmp);
+      eq.uu.noalias_contract_add_outdim(Q_uu_v, pe);
       f .uu.noalias_contract_add_outdim(Q_uu_v, v_x);
 
       auto Q_ux         = l.ux.eval();                            auto Q_ux_v = eigen::as_mut_view(Q_ux);
       Q_ux_v.noalias() += f.u.transpose() * V_xx * f.x;
       Q_ux_v.noalias() +=  eq.u.transpose() * tmp2;
-      eq.ux.noalias_contract_add_outdim(Q_ux_v, tmp);
+      eq.ux.noalias_contract_add_outdim(Q_ux_v, pe);
       f .ux.noalias_contract_add_outdim(Q_ux_v, v_x);
       // clang-format on
 
-      /* *
+      /*
        * when scalar_t is boost::multiprecision::big_float
        * and du has size 1 at compile time
        *
@@ -95,7 +98,7 @@ auto ddp_solver_t<Problem>::
        * => eq.u.transpose() * eq.u() is convertible to scalar_t
        * => mu * (eq.u.transpose() * eq.u())
        *     --^--
-       *  boost::multiprecision::operator*
+       *  boost::multiprecision::operator* converts rhs to scalar_t
        * => results in scalar_t instead of matrix
        */
 
@@ -137,6 +140,8 @@ auto ddp_solver_t<Problem>::
 
       auto const k = u_fb.val();
       auto const K = u_fb.jac();
+
+      expected_decrease += (0.5 * k.transpose() * Q_uu * k).value();
 
       // clang-format off
       V_x            = Q_x;

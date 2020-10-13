@@ -11,6 +11,8 @@
 
 #include <new>
 #include <stdexcept>
+#include <mutex>
+#include <atomic>
 
 #if __cplusplus >= 201703L
 #define DDP_LAUNDER(...) ::std::launder(__VA_ARGS__)
@@ -30,10 +32,12 @@ namespace pinocchio {
 template <typename T, index_t Nq, index_t Nv>
 struct model_t<T, Nq, Nv>::impl_model_t {
   ::pinocchio::ModelTpl<scalar_t> m_impl;
+  std::mutex m_lock;
 };
 template <typename T, index_t Nq, index_t Nv>
 struct model_t<T, Nq, Nv>::impl_data_t {
   ::pinocchio::DataTpl<scalar_t> m_impl;
+  std::atomic<bool> m_available;
 };
 
 } // namespace pinocchio
@@ -93,6 +97,13 @@ void buildAllJointsModel(Model& model) {
 namespace ddp {
 namespace pinocchio {
 
+template <typename T, index_t Nq, index_t Nv>
+model_t<T, Nq, Nv>::key::~key() {
+  if (m_parent != nullptr) {
+    m_parent->m_available = true;
+  }
+}
+
 namespace detail {
 
 struct builder_from_urdf_t {
@@ -141,10 +152,10 @@ model_t<T, Nq, Nv>::model_t(Model_Builder&& model_builder, index_t n_parallel) n
 
   ::pinocchio::Model model_double{};
   static_cast<Model_Builder&&>(model_builder)(model_double);
-  m_model = new (m_model) impl_model_t{model_double.cast<scalar_t>()};
+  m_model = new (m_model) impl_model_t{model_double.cast<scalar_t>(), {}};
 
   for (index_t i = 0; i < m_num_data; ++i) {
-    new (m_data + i) impl_data_t{::pinocchio::DataTpl<scalar_t>{m_model->m_impl}};
+    new (m_data + i) impl_data_t{::pinocchio::DataTpl<scalar_t>{m_model->m_impl}, {true}};
   }
 
   m_config_dim = m_model->m_impl.nq;
@@ -190,8 +201,16 @@ model_t<T, Nq, Nv>::model_t(model_t&& other) noexcept {
 }
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::get_data() const noexcept -> impl_data_t* {
-  return static_cast<impl_data_t*>(m_data);
+auto model_t<T, Nq, Nv>::acquire_workspace() const noexcept -> key {
+  std::lock_guard<std::mutex> g{m_model->m_lock};
+  for (index_t i = 0; i < m_num_data; ++i) {
+    if (m_data[i].m_available) {
+      m_data[i].m_available = false;
+      return key{m_data[i]};
+    }
+  }
+  DDP_ASSERT_MSG("no workspace available", false);
+  std::terminate();
 }
 
 template <typename T, index_t Nq, index_t Nv>
@@ -350,7 +369,8 @@ void model_t<T, Nq, Nv>::dynamics_aba( //
       ("invalid data", not v.hasNaN()),
       ("invalid data", not tau.hasNaN()));
 
-  impl_data_t* data = this->get_data();
+  key k = acquire_workspace();
+  impl_data_t* data = k.m_parent;
   ::pinocchio::aba(m_model->m_impl, data->m_impl, q, v, tau);
   out_acceleration = data->m_impl.ddq;
 }
@@ -387,7 +407,8 @@ void model_t<T, Nq, Nv>::d_dynamics_aba(      //
       ("invalid data", not v.hasNaN()),
       ("invalid data", not tau.hasNaN()));
 
-  impl_data_t* data = this->get_data();
+  key k = acquire_workspace();
+  impl_data_t* data = k.m_parent;
   ::pinocchio::computeABADerivatives(
       m_model->m_impl,
       data->m_impl,
@@ -424,7 +445,8 @@ auto model_t<T, Nq, Nv>::frame_coordinates(index_t i, const_view_t<Nq> q) const 
       ("configuration vector is not correctly sized", q.rows() == m_config_dim),
       ("invalid data", not q.hasNaN()));
 
-  impl_data_t* data = this->get_data();
+  key k = acquire_workspace();
+  impl_data_t* data = k.m_parent;
   ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
   return data->m_impl.oMf[static_cast<std::size_t>(i)].translation();
 };
@@ -440,7 +462,8 @@ void model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, c
       ("configuration vector is not correctly sized", q.rows() == m_config_dim),
       ("invalid data", not q.hasNaN()));
 
-  impl_data_t* data = this->get_data();
+  key k = acquire_workspace();
+  impl_data_t* data = k.m_parent;
   out.setZero();
 
   auto nv = tangent_dim_c();
@@ -457,7 +480,12 @@ void model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, c
 
   ::pinocchio::computeJointJacobians(m_model->m_impl, data->m_impl, q);
   ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
-  ::pinocchio::getFrameJacobian(m_model->m_impl, data->m_impl, static_cast<std::size_t>(i), ::pinocchio::WORLD, w);
+  ::pinocchio::getFrameJacobian(
+      m_model->m_impl,
+      data->m_impl,
+      static_cast<std::size_t>(i),
+      ::pinocchio::LOCAL_WORLD_ALIGNED,
+      w);
   out = w.template topRows<3>();
 };
 

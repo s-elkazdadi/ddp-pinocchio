@@ -27,6 +27,7 @@
 #include <boost/preprocessor/variadic/to_seq.hpp>
 #include <boost/preprocessor/seq/variadic_seq_to_seq.hpp>
 #include <boost/preprocessor/seq/seq.hpp>
+#include <omp.h>
 
 #include <Eigen/Core>
 #include <fmt/core.h>

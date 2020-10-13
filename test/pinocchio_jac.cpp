@@ -17,6 +17,7 @@ auto main() -> int {
       std::string{home_dir.begin(), home_dir.end()} +
           "/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf",
       model);
+
   pinocchio::Data data(model);
   pinocchio::Data data2(model);
 
@@ -41,7 +42,7 @@ auto main() -> int {
 
   for (size_t i = 0; i < data.oMf.size(); ++i) {
     jac.setZero();
-    pinocchio::getFrameJacobian(model, data, i, pinocchio::WORLD, jac);
+    pinocchio::getFrameJacobian(model, data, i, pinocchio::LOCAL_WORLD_ALIGNED, jac);
 
     fmt::print("jac         : {}\n", (data2.oMf[i].translation() - data.oMf[i].translation()).transpose());
     fmt::print("finite diff : {}\n", (jac.topRows<3>() * v).transpose());

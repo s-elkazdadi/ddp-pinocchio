@@ -277,13 +277,15 @@ struct no_multiplier_feedback_t {
       return *this;
     }
     auto operator+=(difference_type n) noexcept -> iterator& {
-      DDP_ASSERT(m_index + n < m_end);
-      DDP_ASSERT(m_index + n >= m_begin);
+      DDP_ASSERT_MSG_ALL_OF( //
+          ("", m_index + n < m_end),
+          ("", m_index + n >= m_begin));
       return *this;
     };
     friend auto operator==(iterator a, iterator b) noexcept -> bool {
-      DDP_ASSERT(a.m_begin == b.m_begin);
-      DDP_ASSERT(a.m_end == b.m_end);
+      DDP_ASSERT_MSG_ALL_OF( //
+          ("", a.m_end == b.m_end),
+          ("", a.m_begin == b.m_begin));
       return a.m_index == b.m_index;
     }
   };
@@ -582,7 +584,6 @@ struct ddp_solver_t {
 
     scalar_t retval = 0;
     auto adj = derivs.lfx;
-    // fmt::print("adjoint: {}\n", adj);
 
     eigen::matrix_from_idx_t<scalar_t, eq_indexer_t> pe_storage(eq_idx.max_rows().value());
     eigen::matrix_from_idx_t<scalar_t, control_indexer_t> lu_storage(u_idx.max_rows().value());

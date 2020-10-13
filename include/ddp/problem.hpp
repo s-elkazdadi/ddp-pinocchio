@@ -1021,8 +1021,8 @@ struct problem_t {
         auto eq = eq_v.get().eval();
         auto eq_ = eq_v.get().eval();
 
-        scalar_t eps_x = 1e-30;
-        scalar_t eps_u = 1e-30;
+        scalar_t eps_x = 1e-100;
+        scalar_t eps_u = 1e-100;
 
         auto dx = eigen::make_matrix<scalar_t>(m_dynamics.dstate_dim());
         dx.setRandom();
@@ -1074,8 +1074,8 @@ struct problem_t {
         dddf = -ddf;
         dddeq = -ddeq;
 
-        add_second_order_term(dddf, fxx.get(), fux.get(), fuu.get(), dx, du);
-        add_second_order_term(dddeq, eq_xx.get(), eq_ux.get(), eq_uu.get(), dx, du);
+        ddp::add_second_order_term(dddf, fxx.get(), fux.get(), fuu.get(), dx, du);
+        ddp::add_second_order_term(dddeq, eq_xx.get(), eq_ux.get(), eq_uu.get(), dx, du);
 
         dddf = -dddf;
         dddeq = -dddeq;
@@ -1098,7 +1098,7 @@ struct problem_t {
             ddf.norm() / df.norm() < sqrt(eps_x + eps_u));
 
         DDP_EXPECT_MSG_ANY_OF(
-            ("", fx.get().norm() != 0),
+            ("", fx.get().norm() == 0),
             (fmt::format(
                  "t: {}\n"
                  "ddf:\n"
@@ -1123,7 +1123,7 @@ struct problem_t {
                   ddeq.transpose()),
               ddeq.norm() / deq.norm() < sqrt(eps_x + eps_u));
           DDP_EXPECT_MSG_ANY_OF(
-              ("", eq_x.get().norm() != 0),
+              ("", eq_x.get().norm() == 0),
               (fmt::format(
                    "t: {}\n"
                    "ddeq:\n"

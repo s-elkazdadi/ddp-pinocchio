@@ -57,7 +57,10 @@ auto main() -> int {
       constraint_advance_time_t<constraint_advance_time_t<spatial_constraint_t<model_t, constraint_t>>>>;
 
   auto eq_gen = constraint_t{[&] {
-    auto q = eigen::make_matrix<scalar_t>(fix_index<3>{});
+    auto q0 = eigen::make_matrix<scalar_t>(nq);
+    model.neutral_configuration(eigen::as_mut_view(q0));
+
+    vec_t q = model.frame_coordinates(model.n_frames() - 1, eigen::as_const_view(q0));
     q.setZero();
     return q;
   }()};
