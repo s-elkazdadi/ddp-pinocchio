@@ -537,22 +537,48 @@ auto as_const_view(T const& mat) noexcept                      //
 template <
     typename T,
     typename Rows,
-    typename Cols,
-    int Options = Eigen::ColMajor,
+    typename Cols = fix_index<1>,
+    int Options = Rows::value_at_compile_time != 1
+                      ? Eigen::ColMajor
+                      : Cols::value_at_compile_time == 1 ? Eigen::ColMajor : Eigen::RowMajor,
     typename Max_Rows = Rows,
     typename Max_Cols = Cols>
-auto make_matrix(Rows rows, Cols cols, Max_Rows = {}, Max_Cols = {}) //
-    -> Eigen::Matrix<                                                //
-        T,                                                           //
-        Rows::value_at_compile_time,                                 //
-        Cols::value_at_compile_time,                                 //
-        Options,                                                     //
-        Max_Rows::value_at_compile_time,                             //
-        Max_Cols::value_at_compile_time                              //
+auto make_matrix(Rows rows, Cols cols = {}, Max_Rows = {}, Max_Cols = {}) //
+    -> Eigen::Matrix<                                                     //
+        T,                                                                //
+        Rows::value_at_compile_time,                                      //
+        Cols::value_at_compile_time,                                      //
+        Options,                                                          //
+        Max_Rows::value_at_compile_time,                                  //
+        Max_Cols::value_at_compile_time                                   //
         > {
   DDP_ASSERT(rows.value() > 0);
   DDP_ASSERT(cols.value() > 0);
-  return {rows.value(), cols.value()};
+  Eigen::Matrix<                       //
+      T,                               //
+      Rows::value_at_compile_time,     //
+      Cols::value_at_compile_time,     //
+      Options,                         //
+      Max_Rows::value_at_compile_time, //
+      Max_Cols::value_at_compile_time  //
+      >
+      retval{rows.value(), cols.value()};
+  retval.setZero();
+  return retval;
+}
+
+template <typename T>
+auto rows_c(T const& mat)
+    -> DDP_CONDITIONAL(T::RowsAtCompileTime == Eigen::Dynamic, dyn_index, fix_index<T::RowsAtCompileTime>) {
+  return DDP_CONDITIONAL(T::RowsAtCompileTime == Eigen::Dynamic, dyn_index, fix_index<T::RowsAtCompileTime>){
+      mat.rows()};
+}
+
+template <typename T>
+auto cols_c(T const& mat)
+    -> DDP_CONDITIONAL(T::RowsAtCompileTime == Eigen::Dynamic, dyn_index, fix_index<T::RowsAtCompileTime>) {
+  return DDP_CONDITIONAL(T::RowsAtCompileTime == Eigen::Dynamic, dyn_index, fix_index<T::RowsAtCompileTime>){
+      mat.cols()};
 }
 
 template <index_t N, index_t I>

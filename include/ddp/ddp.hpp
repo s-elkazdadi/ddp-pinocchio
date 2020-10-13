@@ -12,6 +12,7 @@ enum struct mult_update_attempt_result_e {
   no_update,
   update_success,
   update_failure,
+  optimum_attained,
 };
 
 enum struct method {
@@ -432,7 +433,7 @@ struct ddp_solver_t {
     index_t e = this->index_end();
     auto one_idx = indexing::vec_regular_indexer(b, e, fix_index<1>{});
 
-    index_t dim_xf = prob.dstate_dim();
+    index_t dim_xf = prob.dstate_dim().value();
 
     typename derivative_storage_t::lfx_t lfx(1, dim_xf);
     typename derivative_storage_t::lfxx_t lfxx(dim_xf, dim_xf);
@@ -616,27 +617,11 @@ struct ddp_solver_t {
 
       retval = max(retval, lu.stableNorm());
 
-      // fmt::print(
-      //     "{}\n",
-      //     l.x                                  //
-      //         + adj * f.x                      //
-      //         + mu * eq.val.transpose() * eq.x //
-      //         + pe.transpose() * eq.x          //
-      //         + eq.val.transpose() * p_eq.jac());
-
-      adj = (l.x                              //
-             + adj * f.x                      //
-             + mu * eq.val.transpose() * eq.x //
-             + pe.transpose() * eq.x          //
-             + eq.val.transpose() * p_eq.jac())
-                .eval();
-      // adj = l.x;
-      // adj += (adj * f.x).eval();
-      // adj.noalias() += mu * eq.val.transpose() * eq.x;
-      // adj.noalias() += pe.transpose() * eq.x;
-      // adj.noalias() += eq.val.transpose() * p_eq.jac();
-
-      // fmt::print("adjoint: {}\n", adj);
+      adj = adj * f.x;
+      adj += l.x;
+      adj += mu * eq.val.transpose() * eq.x;
+      adj += pe.transpose() * eq.x;
+      adj += eq.val.transpose() * p_eq.jac();
     }
     return retval;
   }
@@ -661,7 +646,8 @@ struct ddp_solver_t {
       trajectory_t const& traj,
       scalar_t const& mu,
       scalar_t const& w,
-      scalar_t const& n) const -> mult_update_attempt_result_e {
+      scalar_t const& n,
+      scalar_t const& stopping_threshold) const -> mult_update_attempt_result_e {
     fmt::string_view name = prob.name();
     log_file_t primal_log{("/tmp/" + std::string{name.begin(), name.end()} + "_primal.dat").c_str()};
     log_file_t dual_log{("/tmp/" + std::string{name.begin(), name.end()} + "_dual.dat").c_str()};
@@ -683,6 +669,10 @@ struct ddp_solver_t {
         "opt constr: {}\n",
         opt_obj,
         opt_constr);
+
+    if (opt_constr < stopping_threshold and opt_obj < stopping_threshold) {
+      return mult_update_attempt_result_e::optimum_attained;
+    }
 
     if (opt_obj < w) {
       if (opt_constr < n) {
@@ -751,21 +741,110 @@ struct ddp_solver_t {
   auto operator=(ddp_solver_t &&) -> ddp_solver_t& = delete;
 
   // clang-format off
-  template <method M, typename Logger, typename Update_Strategy>
+  template <method M>
   auto solve(
-      Logger&                        logger,
-      Update_Strategy const&         update_strategy,
       solver_parameters_t<scalar_t>  solver_parameters,
       trajectory_t                   initial_trajectory
   ) const -> detail::tuple<trajectory_t, control_feedback_t> {
-    detail::unused(logger, update_strategy, solver_parameters, initial_trajectory);
     // clang-format on
-    DDP_ASSERT_MSG("unimplemented", false);
+    auto derivs = uninit_derivative_storage();
+    auto& traj = initial_trajectory;
+    auto new_traj = traj.clone();
+
+    auto reg = solver_parameters.reg;
+    auto mu = solver_parameters.mu;
+    auto w = solver_parameters.w;
+    auto n = solver_parameters.n;
+
+    auto mults = zero_multipliers<M>();
+    for (auto zipped : ranges::zip(mults.eq, traj)) {
+      DDP_BIND(auto&&, (eq, xu), zipped);
+      eq.jac().setRandom();
+      eq.origin() = xu.x();
+    }
+
+    auto ctrl_fb = control_feedback_t{u_idx, prob};
+
+    prob.compute_derivatives(derivs, traj);
+    auto bres = backward_pass<M>(DDP_MOVE(ctrl_fb), traj, mults, reg, mu, derivs);
+
+    mu = bres.mu;
+    auto step = forward_pass<M>(new_traj, traj, mults, bres, true);
+    ctrl_fb = DDP_MOVE(bres.feedback);
+
+    for (index_t iter = 0; iter < solver_parameters.max_iterations; ++iter) {
+      auto mult_update_rv = update_derivatives<M>( //
+          derivs,
+          ctrl_fb,
+          mults,
+          traj,
+          mu,
+          w,
+          n,
+          solver_parameters.optimality_stopping_threshold);
+
+      switch (mult_update_rv) {
+      case mult_update_attempt_result_e::no_update: {
+        break;
+      }
+      case mult_update_attempt_result_e::update_failure: {
+        mu *= 10;
+        break;
+      }
+      case mult_update_attempt_result_e::update_success: {
+        auto opt_obj = optimality_obj(traj, mults, mu, derivs);
+        n = opt_obj / pow(mu, static_cast<scalar_t>(0.1L));
+        w /= pow(mu, static_cast<scalar_t>(1));
+        break;
+      }
+      case mult_update_attempt_result_e::optimum_attained:
+        return {DDP_MOVE(traj), DDP_MOVE(ctrl_fb)};
+      }
+
+      bres = backward_pass<M>(DDP_MOVE(ctrl_fb), traj, mults, reg, mu, derivs);
+      mu = bres.mu;
+      reg = bres.reg;
+      fmt::print(
+          stdout,
+          "====================================================================================================\n"
+          "iter: {:5}   mu: {:13}   reg: {:13}   w: {:13}   n: {:13}\n",
+          iter,
+          mu,
+          reg,
+          w,
+          n);
+
+      step = forward_pass<M>(new_traj, traj, mults, bres, true);
+      ctrl_fb = DDP_MOVE(bres.feedback);
+      if (step >= 0.5) {
+        reg /= 2;
+        if (reg < 1e-5) {
+          reg = 0;
+        }
+      }
+
+      swap(traj, new_traj);
+
+      fmt::print(stdout, "step: {}\n", step);
+      fmt::print(stdout, "eq: ");
+
+      fmt::string_view sep = "";
+      for (auto eq : derivs.eq()) {
+        if (eq.val.size() > 0) {
+          fmt::print("{}{}", sep, eq.val.norm());
+          sep = ", ";
+        }
+      }
+      fmt::print("\n");
+    }
+
+    return {DDP_MOVE(traj), DDP_MOVE(ctrl_fb)};
   }
 
   // clang-format off
   template <method M>
   auto backward_pass(
+      control_feedback_t&&                            ctrl_fb,
       trajectory_t const&                             current_traj,
       typename multiplier_sequence<M>::type const&    mults,
       scalar_t                                        regularization,

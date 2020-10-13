@@ -60,27 +60,12 @@ public:
   };
 
   void update_origin(x_mat_seq_t const& new_trajectory) noexcept {
-    using dstate_idx = typename problem_t::dstate_indexer_t;
-    auto tmp = eigen::matrix_from_idx_t<scalar_t, dstate_idx>{
-        m_prob->dstate_dim(),
-    };
+    auto tmp = eigen::make_matrix<scalar_t>(m_prob->dstate_dim());
 
-    auto tmp_jac_ = eigen::matrix_from_idx_t< //
-        scalar_t,                             //
-        typename indexing::outer_prod_result< //
-            dstate_idx,                       //
-            dstate_idx                        //
-            >::type                           //
-        >{
-        m_prob->dstate_dim(),
-        m_prob->dstate_dim(),
-    };
+    auto tmp_jac_ = eigen::make_matrix<scalar_t>(m_prob->dstate_dim(), m_prob->dstate_dim());
     auto tmp_jac = eigen::as_mut_view(tmp_jac_);
 
-    auto tmp_jac2 = typename jac_mat_seq_t::matrix_t{
-        m_jac_data.m_idx.max_rows().value(),
-        m_prob->dstate_dim(),
-    };
+    auto tmp_jac2 = eigen::make_matrix<scalar_t>(m_jac_data.m_idx.max_rows(), m_prob->dstate_dim());
 
     for (auto zipped : ranges::zip(m_origin, m_val_data, m_jac_data, x_new_truncated_t{new_trajectory})) {
       DDP_BIND(auto&&, (origin, val, jac, x_new), zipped);
@@ -121,12 +106,9 @@ public:
     void operator()(eigen::view_t<val_t> out, eigen::view_t<In const> input) const noexcept {
 
       // TODO: dynamic allocation?
-      In tmp1{m_prob->dstate_dim()};
+      auto tmp1 = eigen::make_matrix<scalar_t>(m_prob->dstate_dim());
 
-      m_prob->difference(
-          eigen::as_mut_view(tmp1),
-          eigen::as_const_view(origin()),
-          eigen::as_const_view(input));
+      m_prob->difference(eigen::as_mut_view(tmp1), eigen::as_const_view(origin()), eigen::as_const_view(input));
 
       out = val();
       out.noalias() += jac() * tmp1;

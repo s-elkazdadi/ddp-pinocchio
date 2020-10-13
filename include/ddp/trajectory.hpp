@@ -104,6 +104,12 @@ public:
 
   auto x_f() -> typename proxy_t<false>::x_proxy_t::value_type { return (*--end(m_state_data)).get(); }
   auto x_f() const -> typename proxy_t<true>::x_proxy_t::value_type { return (*--end(m_state_data)).get(); }
+
+  friend void swap(trajectory_t& t1, trajectory_t& t2) noexcept {
+    trajectory_t tmp = static_cast<trajectory_t&&>(t1);
+    t1 = static_cast<trajectory_t&&>(t2);
+    t2 = static_cast<trajectory_t&&>(tmp);
+  }
 };
 
 } // namespace trajectory

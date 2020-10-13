@@ -288,6 +288,35 @@ struct regular_indexer_t {
   using proxy_t = typename _::begin_end_impl<regular_indexer_t>::proxy_t;
 };
 
+template <typename Idx>
+struct shift_time_idx_t {
+  using row_kind = typename Idx::row_kind;
+  using col_kind = typename Idx::col_kind;
+  using max_row_kind = typename Idx::max_row_kind;
+  using max_col_kind = typename Idx::max_col_kind;
+
+  static constexpr bool random_access = Idx::random_access;
+  Idx m_idx;
+  index_t m_dt;
+
+  auto clone() const noexcept(noexcept(m_idx.clone())) -> shift_time_idx_t { return {m_idx.clone(), m_dt}; }
+  auto index_begin() const noexcept -> index_t { return m_idx.index_begin() - m_dt; }
+  auto index_end() const noexcept -> index_t { return m_idx.index_end() - m_dt; }
+
+  auto required_memory() const noexcept -> index_t { return m_idx.required_memory(); }
+  auto stride(index_t t) const noexcept -> index_t { return m_idx.stride(t + m_dt); }
+  auto stride_n(index_t t, index_t n) const noexcept -> index_t { return m_idx.stride_n(t + m_dt, n); }
+
+  auto rows(index_t t) const noexcept -> row_kind { return m_idx.rows(t + m_dt); }
+  auto cols(index_t t) const noexcept -> col_kind { return m_idx.cols(t + m_dt); }
+
+  auto max_rows() const noexcept -> max_row_kind { return m_idx.max_rows(); }
+  auto max_cols() const noexcept -> max_col_kind { return m_idx.max_cols(); }
+
+  using iterator = typename _::begin_end_impl<shift_time_idx_t>::iterator;
+  using proxy_t = typename _::begin_end_impl<shift_time_idx_t>::proxy_t;
+};
+
 inline auto clamp(index_t x, index_t const low, index_t const high) -> index_t {
   return (x < low) //
              ? low

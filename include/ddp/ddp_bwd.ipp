@@ -11,6 +11,7 @@ template <method M>
 auto ddp_solver_t<Problem>::
     // clang-format off
   backward_pass(
+      control_feedback_t&&                            ctrl_fb,
       trajectory_t const&                             current_traj,
       typename multiplier_sequence<M>::type const&    mults,
       scalar_t                                        regularization,
@@ -20,7 +21,6 @@ auto ddp_solver_t<Problem>::
 {
   // clang-format on
   bool success = false;
-  auto ctrl_fb = control_feedback_t{u_idx, prob};
 
   // TODO preallocate V_{x,xx}, Q_{x,u,xx,ux,uu}
   while (not success) {

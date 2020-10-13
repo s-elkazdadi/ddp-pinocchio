@@ -29,9 +29,7 @@ auto ddp_solver_t<Problem>::
   scalar_t step = 1;
   bool success = false;
 
-  auto tmp = eigen::matrix_from_idx_t<scalar_t, dstate_indexer_t>{
-      prob.dstate_dim(),
-  };
+  auto tmp = eigen::make_matrix<scalar_t>(prob.dstate_dim());
 
   while (not success) {
     if (step < 1e-10) {

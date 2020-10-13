@@ -104,11 +104,6 @@ target_link_libraries(
 )
 target_include_directories(ddp PUBLIC include)
 
-add_library(pinocchio-double test/pinocchio_double.cpp)
-add_library(pinocchio-mpfr-500 test/pinocchio_mpfr_500.cpp)
-target_link_libraries(pinocchio-double PUBLIC ddp)
-target_link_libraries(pinocchio-mpfr-500 PUBLIC ddp)
-
 if(ENABLE_TESTING)
   enable_testing()
   add_subdirectory(test)

@@ -172,74 +172,17 @@ public:
       const_view_t<Nv> tau                      //
   ) const noexcept;
 
+  auto frame_coordinates(index_t i, const_view_t<Nq> q) const noexcept -> Eigen::Matrix<scalar_t, 3, 1>;
+  void d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, const_view_t<Nq> q) const noexcept;
+  auto n_frames() const noexcept -> index_t;
+  auto frame_name(index_t i) const noexcept -> fmt::string_view;
+
   void inverse_dynamics_rnea( //
       mut_view_t<Nv> out_tau, //
       const_view_t<Nq> q,     //
       const_view_t<Nv> v,     //
       const_view_t<Nv> a      //
   ) const noexcept;
-
-  auto _neutral_configuration() const -> Eigen::Matrix<scalar_t, Nq, 1> {
-    Eigen::Matrix<scalar_t, Nq, 1> out{m_config_dim};
-    neutral_configuration(eigen::as_mut_view(out));
-    return out;
-  }
-  auto _random_configuration() const -> Eigen::Matrix<scalar_t, Nq, 1> {
-    Eigen::Matrix<scalar_t, Nq, 1> out{m_config_dim};
-    random_configuration(eigen::as_mut_view(out));
-    return out;
-  }
-
-  template <typename Q, typename V>
-  auto _integrate(Q const& q, V const& v) const -> Eigen::Matrix<scalar_t, Nq, 1> {
-    Eigen::Matrix<scalar_t, Nq, 1> out{m_config_dim};
-    integrate(eigen::as_mut_view(out), eigen::as_const_view(q.eval()), eigen::as_const_view(v.eval()));
-    return out;
-  }
-
-  template <typename Q, typename V>
-  auto _d_integrate_dq(Q const& q, V const& v) const -> Eigen::Matrix<scalar_t, Nv, Nv> {
-    Eigen::Matrix<scalar_t, Nv, Nv> out{m_tangent_dim, m_tangent_dim};
-    integrate_dq(eigen::as_mut_view(out), eigen::as_const_view(q.eval()), eigen::as_const_view(v.eval()));
-    return out;
-  }
-
-  template <typename Q, typename V>
-  auto _d_integrate_dv(Q const& q, V const& v) const -> Eigen::Matrix<scalar_t, Nv, Nv> {
-    Eigen::Matrix<scalar_t, Nv, Nv> out{m_tangent_dim, m_tangent_dim};
-    integrate_dv(eigen::as_mut_view(out), eigen::as_const_view(q.eval()), eigen::as_const_view(v.eval()));
-    return out;
-  }
-
-  template <typename Q_start, typename Q_finish>
-  auto _difference(Q_start const& q_start, Q_finish const& q_finish) const -> Eigen::Matrix<scalar_t, Nv, 1> {
-
-    Eigen::Matrix<scalar_t, Nv, 1> out{m_tangent_dim};
-    difference(eigen::as_mut_view(out), eigen::as_const_view(q_start.eval()), eigen::as_const_view(q_finish.eval()));
-    return out;
-  }
-
-  template <typename Q_start, typename Q_finish>
-  auto _d_difference_dq_start(Q_start const& q_start, Q_finish const& q_finish) const
-      -> Eigen::Matrix<scalar_t, Nv, Nv> {
-    Eigen::Matrix<scalar_t, Nv, Nv> out{m_tangent_dim, m_tangent_dim};
-    d_difference_dq_start(
-        eigen::as_mut_view(out),
-        eigen::as_const_view(q_start.eval()),
-        eigen::as_const_view(q_finish.eval()));
-    return out;
-  }
-
-  template <typename Q_start, typename Q_finish>
-  auto _d_difference_dq_finish(Q_start const& q_start, Q_finish const& q_finish) const
-      -> Eigen::Matrix<scalar_t, Nv, Nv> {
-    Eigen::Matrix<scalar_t, Nv, Nv> out{m_tangent_dim, m_tangent_dim};
-    d_difference_dq_finish(
-        eigen::as_mut_view(out),
-        eigen::as_const_view(q_start.eval()),
-        eigen::as_const_view(q_finish.eval()));
-    return out;
-  }
 };
 
 } // namespace pinocchio

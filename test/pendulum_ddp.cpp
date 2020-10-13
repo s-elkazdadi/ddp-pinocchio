@@ -26,31 +26,33 @@ auto main() -> int {
 
   using vec_t = Eigen::Matrix<scalar_t, -1, 1>;
 
-  using model_t = pinocchio::model_t<scalar_t>;
-  auto model = model_t{"~/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf"};
+  using model_t = pendulum_model_t<scalar_t>;
+  auto model = model_t{1.0, 1.0};
   auto nq = model.configuration_dim_c();
   auto nv = model.tangent_dim_c();
-  constexpr static index_t horizon = 10;
-
-  for (index_t i = 0; i < model.n_frames(); ++i) {
-    fmt::print("{}\n", model.frame_name(i));
-  }
+  constexpr static index_t horizon = 200;
 
   struct constraint_t {
     vec_t m_target;
-    auto eq_idx() const DDP_DECLTYPE_AUTO(indexing::vec_regular_indexer(2, horizon + 2, dyn_index{m_target.size()}));
-    auto operator[](index_t) const -> vec_t const& { return m_target; }
+    auto eq_idx() const -> indexing::range_row_filter_t<indexing::regular_indexer_t<dyn_index>> {
+      auto unfiltered = indexing::vec_regular_indexer(2, horizon + 2, dyn_index{m_target.size()});
+      return {unfiltered, horizon, horizon + 1};
+    }
+    auto operator[](index_t t) const -> vec_t const& {
+      static const vec_t empty{};
+      if (t != horizon + 2) {
+        return empty;
+      }
+      return m_target;
+    }
   };
   using dynamics_t = ddp::dynamics_t<model_t>;
   using problem_t = ddp::problem_t0<
       dynamics_t,
       constraint_advance_time_t<constraint_advance_time_t<config_constraint_t0<model_t, constraint_t>>>>;
 
-  auto eq_gen = constraint_t{[&] {
-    auto q = eigen::make_matrix<scalar_t>(nq, fix_index<1>{});
-    model.neutral_configuration(eigen::as_mut_view(q));
-    return q;
-  }()};
+  auto eq_gen = constraint_t{vec_t{1}};
+  eq_gen.m_target[0] = 3.14;
 
   auto x_init = [&] {
     auto x = eigen::make_matrix<scalar_t>(nq + nv, fix_index<1>{});
@@ -61,7 +63,7 @@ auto main() -> int {
     return x;
   }();
 
-  dynamics_t dy{model, 0.01, false};
+  dynamics_t dy{model, 0.01};
   problem_t prob{
       0,
       horizon,

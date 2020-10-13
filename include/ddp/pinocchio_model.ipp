@@ -3,14 +3,11 @@
 
 #include "ddp/pinocchio_model.hpp"
 
-#include <pinocchio/algorithm/aba-derivatives.hpp>
-#include <pinocchio/algorithm/aba.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
-#include <pinocchio/algorithm/joint-configuration.hpp>
 #include <pinocchio/parsers/urdf.hpp>
-
+#include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/multibody/data.hpp>
+#include <pinocchio/multibody/model.hpp>
 #include <boost/align/aligned_alloc.hpp>
-#include <boost/filesystem.hpp>
 
 #include <new>
 #include <stdexcept>
@@ -20,6 +17,29 @@
 #else
 #define DDP_LAUNDER(...) (__VA_ARGS__)
 #endif
+
+#if !defined(DDP_PINOCCHIO_GENERAL) && !defined(DDP_PINOCCHIO_ABA) && !defined(DDP_PINOCCHIO_FRAMES)
+#define DDP_PINOCCHIO_GENERAL
+#define DDP_PINOCCHIO_ABA
+#define DDP_PINOCCHIO_FRAMES
+#endif
+
+namespace ddp {
+namespace pinocchio {
+
+template <typename T, index_t Nq, index_t Nv>
+struct model_t<T, Nq, Nv>::impl_model_t {
+  ::pinocchio::ModelTpl<scalar_t> m_impl;
+};
+template <typename T, index_t Nq, index_t Nv>
+struct model_t<T, Nq, Nv>::impl_data_t {
+  ::pinocchio::DataTpl<scalar_t> m_impl;
+};
+
+} // namespace pinocchio
+} // namespace ddp
+
+#ifdef DDP_PINOCCHIO_GENERAL
 
 namespace pinocchio {
 template <typename D>
@@ -93,15 +113,6 @@ struct builder_from_urdf_t {
 };
 
 } // namespace detail
-
-template <typename T, index_t Nq, index_t Nv>
-struct model_t<T, Nq, Nv>::impl_model_t {
-  ::pinocchio::ModelTpl<scalar_t> m_impl;
-};
-template <typename T, index_t Nq, index_t Nv>
-struct model_t<T, Nq, Nv>::impl_data_t {
-  ::pinocchio::DataTpl<scalar_t> m_impl;
-};
 
 template <typename T, index_t Nq, index_t Nv>
 template <typename Model_Builder>
@@ -257,74 +268,6 @@ void model_t<T, Nq, Nv>::d_integrate_dv(
 }
 
 template <typename T, index_t Nq, index_t Nv>
-template <typename Out, typename In>
-void model_t<T, Nq, Nv>::d_integrate_transport_dq_or_dv(
-    Out out_J,          //
-    In in_J,            //
-    const_view_t<Nq> q, //
-    const_view_t<Nv> v, //
-    bool dq             //
-) const noexcept {
-  DDP_ASSERT_MSG_ALL_OF(
-      ("output jacobian has the wrong number of columns", out_J.cols() == m_tangent_dim),
-      ("input jacobian has the wrong number of columns", in_J.cols() == m_tangent_dim),
-      ("{} and output jacobian have a mismatching number of rows.", out_J.rows() == in_J.rows()),
-      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
-      ("tangent vector is not correctly sized", v.rows() == m_tangent_dim),
-      ("invalid data", not q.hasNaN()),
-      ("invalid data", not v.hasNaN()));
-
-  auto arg = dq ? ::pinocchio::ArgumentPosition::ARG0 : ::pinocchio::ArgumentPosition::ARG1;
-  if (in_J.data() == out_J.data()) {
-    assert(in_J.rows() == out_J.rows());
-    assert(in_J.outerStride() == out_J.outerStride());
-    ::pinocchio::dIntegrateTransport(m_model->m_impl, q, v, out_J.transpose(), arg);
-  } else {
-    ::pinocchio::dIntegrateTransport(m_model->m_impl, q, v, in_J.transpose(), out_J.transpose(), arg);
-  }
-}
-
-template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::d_integrate_transport_dq(
-    mut_view_t<Eigen::Dynamic, Nv> out_J,  //
-    const_view_t<Eigen::Dynamic, Nv> in_J, //
-    const_view_t<Nq> q,                    //
-    const_view_t<Nv> v                     //
-) const noexcept {
-  d_integrate_transport_dq_or_dv(out_J, in_J, q, v, true);
-}
-
-template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::d_integrate_transport_dv(
-    mut_view_t<Eigen::Dynamic, Nv> out_J,  //
-    const_view_t<Eigen::Dynamic, Nv> in_J, //
-    const_view_t<Nq> q,                    //
-    const_view_t<Nv> v                     //
-) const noexcept {
-  d_integrate_transport_dq_or_dv(out_J, in_J, q, v, false);
-}
-
-template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::d_integrate_transport_dq(
-    row_major_mut_view_t<Eigen::Dynamic, Nv> out_J,  //
-    row_major_const_view_t<Eigen::Dynamic, Nv> in_J, //
-    const_view_t<Nq> q,                              //
-    const_view_t<Nv> v                               //
-) const noexcept {
-  d_integrate_transport_dq_or_dv(out_J, in_J, q, v, true);
-}
-
-template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::d_integrate_transport_dv(
-    row_major_mut_view_t<Eigen::Dynamic, Nv> out_J,  //
-    row_major_const_view_t<Eigen::Dynamic, Nv> in_J, //
-    const_view_t<Nq> q,                              //
-    const_view_t<Nv> v                               //
-) const noexcept {
-  d_integrate_transport_dq_or_dv(out_J, in_J, q, v, false);
-}
-
-template <typename T, index_t Nq, index_t Nv>
 void model_t<T, Nq, Nv>::difference(
     mut_view_t<Nv> out_v,     //
     const_view_t<Nq> q_start, //
@@ -376,6 +319,19 @@ void model_t<T, Nq, Nv>::d_difference_dq_finish(
 
   ::pinocchio::dDifference(m_model->m_impl, q_start, q_finish, out_v_dq_finish, ::pinocchio::ArgumentPosition::ARG1);
 }
+
+} // namespace pinocchio
+} // namespace ddp
+
+#endif
+
+#ifdef DDP_PINOCCHIO_ABA
+
+#include <pinocchio/algorithm/aba-derivatives.hpp>
+#include <pinocchio/algorithm/aba.hpp>
+
+namespace ddp {
+namespace pinocchio {
 
 template <typename T, index_t Nq, index_t Nv>
 void model_t<T, Nq, Nv>::dynamics_aba( //
@@ -443,28 +399,84 @@ void model_t<T, Nq, Nv>::d_dynamics_aba(      //
       out_acceleration_dtau);
 }
 
-template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::inverse_dynamics_rnea( //
-    mut_view_t<Nv> out_tau,                     //
-    const_view_t<Nq> q,                         //
-    const_view_t<Nv> v,                         //
-    const_view_t<Nv> a                          //
-) const noexcept {
+} // namespace pinocchio
+} // namespace ddp
 
-  DDP_ASSERT_MSG_ALL_OF(
-      ("output control vector is not correctly sized", out_tau.rows() == m_tangent_dim),
+#endif
+
+#ifdef DDP_PINOCCHIO_FRAMES
+
+#include <pinocchio/algorithm/frames.hpp>
+#include <pinocchio/algorithm/frames-derivatives.hpp>
+#include <pinocchio/algorithm/kinematics-derivatives.hpp>
+#include <pinocchio/algorithm/kinematics.hpp>
+
+namespace ddp {
+namespace pinocchio {
+
+template <typename T, index_t Nq, index_t Nv>
+auto model_t<T, Nq, Nv>::frame_coordinates(index_t i, const_view_t<Nq> q) const noexcept
+    -> Eigen::Matrix<scalar_t, 3, 1> {
+  DDP_ASSERT_MSG_ALL_OF( //
+      ("frame index must be in bounds", i >= 0),
+      ("frame index must be in bounds", i < m_model->m_impl.nframes),
+
       ("configuration vector is not correctly sized", q.rows() == m_config_dim),
-      ("velocity vector is not correctly sized", v.rows() == m_tangent_dim),
-      ("acceleration vector is not correctly sized", a.rows() == m_tangent_dim),
-      ("invalid data", not q.hasNaN()),
-      ("invalid data", not v.hasNaN()),
-      ("invalid data", not a.hasNaN()));
+      ("invalid data", not q.hasNaN()));
 
   impl_data_t* data = this->get_data();
-  ::pinocchio::rnea(m_model->m_impl, data->m_impl, q, v, a);
-  out_tau = data->m_impl.tau;
+  ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
+  return data->m_impl.oMf[static_cast<std::size_t>(i)].translation();
+};
+
+template <typename T, index_t Nq, index_t Nv>
+void model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, const_view_t<Nq> q) const noexcept {
+  DDP_ASSERT_MSG_ALL_OF( //
+      ("frame index must be in bounds", i >= 0),
+      ("frame index must be in bounds", i < m_model->m_impl.nframes),
+
+      ("output constraint jacobian matrix is not correctly sized", out.cols() == m_tangent_dim),
+
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("invalid data", not q.hasNaN()));
+
+  impl_data_t* data = this->get_data();
+  out.setZero();
+
+  auto nv = tangent_dim_c();
+  thread_local auto workspace = eigen::make_matrix<scalar_t>(fix_index<6>{}, nv);
+
+  if (nv.value() > workspace.cols()) {
+    workspace.resize(6, nv.value());
+    workspace.setZero();
+  } else if (nv.value() != workspace.cols()) {
+    workspace.setZero();
+  }
+
+  Eigen::Map<decltype(workspace)> w{workspace.data(), 6, nv.value()};
+
+  ::pinocchio::computeJointJacobians(m_model->m_impl, data->m_impl, q);
+  ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
+  ::pinocchio::getFrameJacobian(m_model->m_impl, data->m_impl, i, ::pinocchio::WORLD, w);
+  out = w.template topRows<3>();
+};
+
+template <typename T, index_t Nq, index_t Nv>
+auto model_t<T, Nq, Nv>::n_frames() const noexcept -> index_t {
+  return m_model->m_impl.nframes;
+}
+
+template <typename T, index_t Nq, index_t Nv>
+auto model_t<T, Nq, Nv>::frame_name(index_t i) const noexcept -> fmt::string_view {
+  DDP_ASSERT_MSG_ALL_OF( //
+      ("frame index must be in bounds", i >= 0),
+      ("frame index must be in bounds", i < m_model->m_impl.nframes));
+
+  return m_model->m_impl.frames[i].name;
 }
 
 } // namespace pinocchio
 } // namespace ddp
+
+#endif
 #endif /* end of include guard PINOCCHIO_MODEL_IPP_2I6Y8FFV */
