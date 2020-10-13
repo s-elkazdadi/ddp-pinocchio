@@ -32,19 +32,15 @@ auto main() -> int {
   auto nv = model.tangent_dim_c();
   constexpr static index_t horizon = 10;
 
-  for (index_t i = 0; i < model.n_frames(); ++i) {
-    fmt::print("{}\n", model.frame_name(i));
-  }
-
   struct constraint_t {
     vec_t m_target;
     auto eq_idx() const DDP_DECLTYPE_AUTO(indexing::vec_regular_indexer(2, horizon + 2, dyn_index{m_target.size()}));
     auto operator[](index_t) const -> vec_t const& { return m_target; }
   };
   using dynamics_t = ddp::dynamics_t<model_t>;
-  using problem_t = ddp::problem_t0<
+  using problem_t = ddp::problem_t<
       dynamics_t,
-      constraint_advance_time_t<constraint_advance_time_t<config_constraint_t0<model_t, constraint_t>>>>;
+      constraint_advance_time_t<constraint_advance_time_t<config_constraint_t<model_t, constraint_t>>>>;
 
   auto eq_gen = constraint_t{[&] {
     auto q = eigen::make_matrix<scalar_t>(nq, fix_index<1>{});
@@ -68,7 +64,7 @@ auto main() -> int {
       1.0,
       dy,
       constraint_advance_time(
-          constraint_advance_time(config_constraint_t0<model_t, constraint_t>{dy, DDP_MOVE(eq_gen)})),
+          constraint_advance_time(config_constraint_t<model_t, constraint_t>{dy, DDP_MOVE(eq_gen)})),
   };
   auto u_idx = indexing::vec_regular_indexer(0, horizon, nv);
   auto eq_idx = prob.m_constraint.eq_idx();

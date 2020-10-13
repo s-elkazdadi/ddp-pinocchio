@@ -381,7 +381,7 @@ public:
   auto unfiltered_rows(index_t t) const noexcept -> typename Indexer::row_kind { return m_idx.rows(t); }
 
   auto rows(index_t t) const noexcept -> row_kind {
-    return (t >= m_range_begin and t < m_range_end) ? unfiltered_rows(t) : dyn_index{0};
+    return (t >= m_range_begin and t < m_range_end) ? dyn_index{unfiltered_rows(t)} : dyn_index{0};
   }
   auto cols(index_t) const noexcept -> col_kind { return {}; }
 

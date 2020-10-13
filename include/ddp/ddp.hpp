@@ -268,22 +268,22 @@ struct no_multiplier_feedback_t {
     static constexpr access_e iter_category = access_e::random;
 
     auto operator++() noexcept -> iterator& {
-      assert(m_index + 1 < m_end);
+      DDP_ASSERT(m_index + 1 < m_end);
       ++m_index;
       return *this;
     }
     auto operator--() noexcept -> iterator& {
-      assert(m_index - 1 >= m_begin);
+      DDP_ASSERT(m_index - 1 >= m_begin);
       return *this;
     }
     auto operator+=(difference_type n) noexcept -> iterator& {
-      assert(m_index + n < m_end);
-      assert(m_index + n >= m_begin);
+      DDP_ASSERT(m_index + n < m_end);
+      DDP_ASSERT(m_index + n >= m_begin);
       return *this;
     };
     friend auto operator==(iterator a, iterator b) noexcept -> bool {
-      assert(a.m_begin == b.m_begin);
-      assert(a.m_end == b.m_end);
+      DDP_ASSERT(a.m_begin == b.m_begin);
+      DDP_ASSERT(a.m_end == b.m_end);
       return a.m_index == b.m_index;
     }
   };
@@ -628,13 +628,13 @@ struct ddp_solver_t {
 
   auto index_begin() const -> index_t {
     index_t b = u_idx.index_begin();
-    assert(b == eq_idx.index_begin());
+    DDP_ASSERT(b == eq_idx.index_begin());
     return b;
   }
 
   auto index_end() const -> index_t {
     index_t e = u_idx.index_end();
-    assert(e == eq_idx.index_end());
+    DDP_ASSERT(e == eq_idx.index_end());
     return e;
   }
 

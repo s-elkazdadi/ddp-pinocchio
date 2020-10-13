@@ -26,33 +26,41 @@ auto main() -> int {
 
   using vec_t = Eigen::Matrix<scalar_t, -1, 1>;
 
-  using model_t = pendulum_model_t<scalar_t>;
-  auto model = model_t{1.0, 1.0};
+  using model_t = pinocchio::model_t<scalar_t>;
+  auto model = model_t{"~/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf"};
   auto nq = model.configuration_dim_c();
   auto nv = model.tangent_dim_c();
-  constexpr static index_t horizon = 200;
+  constexpr static index_t horizon = 10;
+
+  for (index_t i = 0; i < model.n_frames(); ++i) {
+    fmt::print("{}\n", model.frame_name(i));
+  }
 
   struct constraint_t {
-    vec_t m_target;
+    using vec3 = decltype(eigen::make_matrix<scalar_t>(fix_index<3>{}));
+    vec3 m_target;
     auto eq_idx() const -> indexing::range_row_filter_t<indexing::regular_indexer_t<dyn_index>> {
-      auto unfiltered = indexing::vec_regular_indexer(2, horizon + 2, dyn_index{m_target.size()});
+      auto unfiltered = indexing::vec_regular_indexer(2, horizon + 2, dyn_index{3});
       return {unfiltered, horizon, horizon + 1};
     }
-    auto operator[](index_t t) const -> vec_t const& {
+    auto operator[](index_t t) const -> Eigen::Map<vec_t const> {
       static const vec_t empty{};
       if (t != horizon) {
-        return empty;
+        return {nullptr, 0, 1};
       }
-      return m_target;
+      return {m_target.data(), m_target.rows(), m_target.cols()};
     }
   };
   using dynamics_t = ddp::dynamics_t<model_t>;
   using problem_t = ddp::problem_t<
       dynamics_t,
-      constraint_advance_time_t<constraint_advance_time_t<config_constraint_t<model_t, constraint_t>>>>;
+      constraint_advance_time_t<constraint_advance_time_t<spatial_constraint_t<model_t, constraint_t>>>>;
 
-  auto eq_gen = constraint_t{vec_t{1}};
-  eq_gen.m_target[0] = 3.14;
+  auto eq_gen = constraint_t{[&] {
+    auto q = eigen::make_matrix<scalar_t>(fix_index<3>{});
+    q.setZero();
+    return q;
+  }()};
 
   auto x_init = [&] {
     auto x = eigen::make_matrix<scalar_t>(nq + nv, fix_index<1>{});
@@ -63,14 +71,14 @@ auto main() -> int {
     return x;
   }();
 
-  dynamics_t dy{model, 0.01};
+  dynamics_t dy{model, 0.01, false};
   problem_t prob{
       0,
       horizon,
       1.0,
       dy,
-      constraint_advance_time(
-          constraint_advance_time(config_constraint_t<model_t, constraint_t>{dy, DDP_MOVE(eq_gen)})),
+      constraint_advance_time(constraint_advance_time(
+          spatial_constraint_t<model_t, constraint_t>{dy, DDP_MOVE(eq_gen), model.n_frames() - 1})),
   };
   auto u_idx = indexing::vec_regular_indexer(0, horizon, nv);
   auto eq_idx = prob.m_constraint.eq_idx();

@@ -457,7 +457,7 @@ void model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, c
 
   ::pinocchio::computeJointJacobians(m_model->m_impl, data->m_impl, q);
   ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
-  ::pinocchio::getFrameJacobian(m_model->m_impl, data->m_impl, i, ::pinocchio::WORLD, w);
+  ::pinocchio::getFrameJacobian(m_model->m_impl, data->m_impl, static_cast<std::size_t>(i), ::pinocchio::WORLD, w);
   out = w.template topRows<3>();
 };
 
@@ -472,7 +472,7 @@ auto model_t<T, Nq, Nv>::frame_name(index_t i) const noexcept -> fmt::string_vie
       ("frame index must be in bounds", i >= 0),
       ("frame index must be in bounds", i < m_model->m_impl.nframes));
 
-  return m_model->m_impl.frames[i].name;
+  return m_model->m_impl.frames[static_cast<std::size_t>(i)].name;
 }
 
 } // namespace pinocchio
