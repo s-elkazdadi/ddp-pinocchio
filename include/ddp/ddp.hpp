@@ -801,7 +801,7 @@ struct ddp_solver_t {
           using std::pow;
           auto opt_obj = optimality_obj(traj, mults, mu, derivs);
           auto opt_constr = optimality_constr(derivs);
-          n = opt_constr / pow(mu, static_cast<scalar_t>(0.1L));
+          n = opt_constr / pow(mu, static_cast<scalar_t>(0.5L));
           w /= pow(mu, static_cast<scalar_t>(1));
           break;
         }
