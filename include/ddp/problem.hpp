@@ -939,6 +939,310 @@ auto config_constraint(Dynamics d, Constraint_Target_View v)
   return {d, v};
 }
 
+template <typename Problem>
+void compute_derivatives(
+    Problem const& prob, typename Problem::derivative_storage_t& derivs, typename Problem::trajectory_t const& traj) {
+  using scalar_t = typename Problem::scalar_t;
+
+  derivs.lfx.setZero();
+  derivs.lfxx.setZero();
+
+  // clang-format off
+    auto rng = ranges::zip(
+          derivs.lx, derivs.lu, derivs.lxx, derivs.lux, derivs.luu,
+          derivs.f_val, derivs.fx, derivs.fu, derivs.fxx, derivs.fux, derivs.fuu,
+          derivs.eq_val, derivs.eq_x, derivs.eq_u, derivs.eq_xx, derivs.eq_ux, derivs.eq_uu,
+          traj);
+  // clang-format on
+
+  using iter = typename decltype(rng)::iterator;
+
+  constexpr index_t max_threads = 16;
+
+  index_t n_threads = std::min(max_threads, index_t{omp_get_num_procs()});
+  iter begin_arr[max_threads];
+  iter end_arr[max_threads];
+
+  {
+    index_t horizon = 1 + (*(--end(traj))).current_index() - (*begin(traj)).current_index();
+    index_t r = horizon % n_threads;
+
+    iter it = begin(rng);
+    for (index_t i = 0; i < n_threads; ++i) {
+      index_t n_iterations = horizon / n_threads + ((i < r) ? 1 : 0);
+
+      begin_arr[i] = it;
+      for (index_t j = 0; j < n_iterations; ++j) {
+        ++it;
+      }
+      end_arr[i] = it;
+    }
+    DDP_ASSERT((it == end(rng)));
+  }
+
+  prob.lf_second_order_deriv( //
+      eigen::as_mut_view(derivs.lfxx),
+      eigen::as_mut_view(derivs.lfx),
+      traj.x_f());
+
+#pragma omp parallel num_threads(n_threads)
+  {
+    index_t thread_id = omp_get_thread_num();
+    DDP_ASSERT(thread_id >= 0);
+    DDP_ASSERT(thread_id < n_threads);
+
+    auto k = prob.dynamics().acquire_workspace();
+
+    for (iter it = begin_arr[thread_id], it_end = end_arr[thread_id]; it != it_end; ++it) {
+      auto zipped = *it;
+      // clang-format off
+      DDP_BIND(auto&&, (
+          lx, lu, lxx, lux, luu,
+          f_v, fx, fu, fxx, fux, fuu,
+          eq_v, eq_x, eq_u, eq_xx, eq_ux, eq_uu,
+          xu), zipped);
+      // clang-format on
+
+      DDP_ASSERT(not xu.x().hasNaN());
+      DDP_ASSERT(not xu.x_next().hasNaN());
+      DDP_ASSERT(not xu.u().hasNaN());
+
+      auto t = xu.current_index();
+      auto x = xu.x();
+      auto u = xu.u();
+
+      prob.l_second_order_deriv(lxx.get(), lux.get(), luu.get(), lx.get(), lu.get(), t, x, u);
+
+      {
+        auto msg = fmt::format("  computing f  derivatives from thread {}", thread_id);
+        ddp::chronometer_t timer(msg.c_str());
+        k = prob.dynamics().second_order_deriv(
+            fxx.get(),
+            fux.get(),
+            fuu.get(),
+            fx.get(),
+            fu.get(),
+            f_v.get(),
+            t,
+            x,
+            u,
+            DDP_MOVE(k));
+      }
+      {
+        auto msg = fmt::format("  computing eq derivatives from thread {}", thread_id);
+        ddp::chronometer_t timer(msg.c_str());
+        k = prob.constraint().second_order_deriv(
+            eq_xx.get(),
+            eq_ux.get(),
+            eq_uu.get(),
+            eq_x.get(),
+            eq_u.get(),
+            eq_v.get(),
+            t,
+            x,
+            u,
+            DDP_MOVE(k));
+      }
+
+#if not defined(NDEBUG)
+      {
+        using vec_t = Eigen::Matrix<scalar_t, Eigen::Dynamic, 1>;
+        DDP_ASSERT(not eq_v.get().hasNaN());
+        DDP_ASSERT(not eq_x.get().hasNaN());
+        DDP_ASSERT(not eq_u.get().hasNaN());
+        DDP_ASSERT(not eq_xx.get().has_nan());
+        DDP_ASSERT(not eq_ux.get().has_nan());
+        DDP_ASSERT(not eq_uu.get().has_nan());
+
+        DDP_ASSERT(not fx.get().hasNaN());
+        DDP_ASSERT(not fu.get().hasNaN());
+        DDP_ASSERT(not fxx.get().has_nan());
+        DDP_ASSERT(not fux.get().has_nan());
+        DDP_ASSERT(not fuu.get().has_nan());
+
+        auto ne = eq_v.get().rows();
+
+        scalar_t l;
+        scalar_t l_;
+        auto f = f_v.get().eval();
+        auto f_ = f_v.get().eval();
+        auto eq = eq_v.get().eval();
+        auto eq_ = eq_v.get().eval();
+
+        scalar_t _dl1;
+        auto _df1 = eigen::make_matrix<scalar_t>(prob.dynamics().dstate_dim());
+        auto _deq1 = eq_v.get().eval();
+
+        scalar_t _ddl1;
+        auto _ddf1 = eigen::make_matrix<scalar_t>(prob.dynamics().dstate_dim());
+        vec_t _ddeq1{ne};
+
+        scalar_t _dddl1;
+        auto _dddf1 = eigen::make_matrix<scalar_t>(prob.dynamics().dstate_dim());
+        vec_t _dddeq1{ne};
+
+        scalar_t _dl2;
+        auto _df2 = eigen::make_matrix<scalar_t>(prob.dynamics().dstate_dim());
+        auto _deq2 = eq_v.get().eval();
+
+        scalar_t _ddl2;
+        auto _ddf2 = eigen::make_matrix<scalar_t>(prob.dynamics().dstate_dim());
+        vec_t _ddeq2{ne};
+
+        scalar_t _dddl2;
+        auto _dddf2 = eigen::make_matrix<scalar_t>(prob.dynamics().dstate_dim());
+        vec_t _dddeq2{ne};
+
+        auto* dl = &_dl1;
+        auto* df = &_df1;
+        auto* deq = &_deq1;
+
+        auto* ddl = &_ddl1;
+        auto* ddf = &_ddf1;
+        auto* ddeq = &_ddeq1;
+
+        auto* dddl = &_dddl1;
+        auto* dddf = &_dddf1;
+        auto* dddeq = &_dddeq1;
+
+        auto dx_ = eigen::make_matrix<scalar_t>(prob.dynamics().dstate_dim());
+        dx_.setRandom();
+
+        auto du_ = eigen::make_matrix<scalar_t>(prob.dynamics().dcontrol_dim(t));
+        du_.setRandom();
+
+        auto finite_diff_err = [&](scalar_t eps_x, scalar_t eps_u) {
+          auto dx = (dx_.operator*(eps_x)).eval();
+          auto du = (du_.operator*(eps_u)).eval();
+
+          auto x_ = x.eval();
+          auto u_ = u.eval();
+
+          prob.dynamics().integrate_x(eigen::as_mut_view(x_), eigen::as_const_view(x), eigen::as_const_view(dx));
+          prob.dynamics().integrate_u(eigen::as_mut_view(u_), t, eigen::as_const_view(u), eigen::as_const_view(du));
+
+          l = prob.l(t, x, u);
+          k = prob.eval_f_to(eigen::as_mut_view(f), t, x, u, DDP_MOVE(k));
+          k = prob.eval_eq_to(eigen::as_mut_view(eq), t, x, u, DDP_MOVE(k));
+
+          l_ = prob.l(t, eigen::as_const_view(x_), eigen::as_const_view(u_));
+          k = prob.eval_f_to(
+              eigen::as_mut_view(f_),
+              t,
+              eigen::as_const_view(x_),
+              eigen::as_const_view(u_),
+              DDP_MOVE(k));
+          k = prob.eval_eq_to(
+              eigen::as_mut_view(eq_),
+              t,
+              eigen::as_const_view(x_),
+              eigen::as_const_view(u_),
+              DDP_MOVE(k));
+
+          *dl = l_ - l;
+          prob.dynamics().difference_out(eigen::as_mut_view(*df), eigen::as_const_view(f), eigen::as_const_view(f_));
+          prob.constraint().difference_out(
+              eigen::as_mut_view(*deq),
+              eigen::as_const_view(eq),
+              eigen::as_const_view(eq_));
+
+          *ddl = *dl - (lx.get() * dx + lu.get() * du).value();
+          *ddf = *df - (fx.get() * dx + fu.get() * du);
+          *ddeq = *deq - (eq_x.get() * dx + eq_u.get() * du);
+
+          *dddl = *ddl - (0.5 * dx.transpose() * lxx.get() * dx   //
+                          + 0.5 * du.transpose() * luu.get() * du //
+                          + du.transpose() * lux.get() * dx)
+                             .value();
+          *dddf = -*ddf;
+          *dddeq = -*ddeq;
+
+          ddp::add_second_order_term(*dddf, fxx.get(), fux.get(), fuu.get(), dx, du);
+          ddp::add_second_order_term(*dddeq, eq_xx.get(), eq_ux.get(), eq_uu.get(), dx, du);
+
+          *dddf = -*dddf;
+          *dddeq = -*dddeq;
+        };
+
+        scalar_t eps_x = 1e-30;
+        scalar_t eps_u = 1e-30;
+
+        scalar_t eps_factor = 0.1;
+
+        finite_diff_err(eps_x, eps_u);
+
+        dl = &_dl2;
+        df = &_df2;
+        deq = &_deq2;
+
+        ddl = &_ddl2;
+        ddf = &_ddf2;
+        ddeq = &_ddeq2;
+
+        dddl = &_dddl2;
+        dddf = &_dddf2;
+        dddeq = &_dddeq2;
+
+        finite_diff_err(eps_x * eps_factor, eps_u * eps_factor);
+
+        auto dl1 = _dl1;
+        auto dl2 = _dl2;
+        auto ddl1 = _ddl1;
+        auto ddl2 = _ddl2;
+        auto dddl1 = _dddl1;
+        auto dddl2 = _dddl2;
+
+        auto df1 = _df1.array();
+        auto df2 = _df2.array();
+        auto ddf1 = _ddf1.array();
+        auto ddf2 = _ddf2.array();
+        auto dddf1 = _dddf1.array();
+        auto dddf2 = _dddf2.array();
+
+        auto deq1 = _deq1.array();
+        auto deq2 = _deq2.array();
+        auto ddeq1 = _ddeq1.array();
+        auto ddeq2 = _ddeq2.array();
+        auto dddeq1 = _dddeq1.array();
+        auto dddeq2 = _dddeq2.array();
+
+        using std::fabs;
+        using std::pow;
+
+        auto eps = pow(std::numeric_limits<scalar_t>::epsilon(), 0.9);
+
+        DDP_EXPECT_MSG_ALL_OF(
+            (fmt::format("{}\n{}", dl1, dl2), (fabs(dl1) <= eps or fabs(dl2) <= 2 * eps_factor * fabs(dl1))),
+            (fmt::format("{}\n{}", ddl1, ddl2),
+             (fabs(ddl1) <= eps or fabs(ddl2) <= 2 * pow(eps_factor, 2) * fabs(ddl1))),
+            (fmt::format("{}\n{}", dddl1, dddl2),
+             (fabs(dddl1) <= eps or fabs(dddl2) <= 2 * pow(eps_factor, 3) * fabs(dddl1))));
+
+        for (index_t i = 0; i < df1.size(); ++i) {
+          DDP_EXPECT_MSG_ALL_OF(
+              (fmt::format("{}\n{}", df1[i], df2[i]),
+               (fabs(df1[i]) <= eps or fabs(df2[i]) <= 2 * eps_factor * fabs(df1[i]))),
+              (fmt::format("{}\n{}", ddf1[i], ddf2[i]),
+               (fabs(ddf1[i]) <= eps or fabs(ddf2[i]) <= 2 * pow(eps_factor, 2) * fabs(ddf1[i]))),
+              (fmt::format("{}\n{}", dddf1[i], dddf2[i]),
+               (fabs(dddf1[i]) <= eps or fabs(dddf2[i]) <= 2 * pow(eps_factor, 3) * fabs(dddf1[i]))));
+        }
+
+        for (index_t i = 0; i < deq1.size(); ++i) {
+          DDP_EXPECT_MSG_ALL_OF(
+              (fmt::format("{}\n{}", deq1[i], deq2[i]),
+               (fabs(deq1[i]) <= eps or fabs(deq2[i]) <= 2 * eps_factor * fabs(deq1[i]))),
+              (fmt::format("{}\n{}", ddeq1[i], ddeq2[i]),
+               (fabs(ddeq1[i]) <= eps or fabs(ddeq2[i]) <= 2 * pow(eps_factor, 2) * fabs(ddeq1[i]))),
+              (fmt::format("{}\n{}", dddeq1[i], dddeq2[i]),
+               (fabs(dddeq1[i]) <= eps or fabs(dddeq2[i]) <= 2 * pow(eps_factor, 3) * fabs(dddeq1[i]))));
+        }
+      }
+#endif
+    }
+  }
+}
+
 template <typename Dynamics, typename Eq>
 struct problem_t {
   using dynamics_t = Dynamics;
@@ -1008,11 +1312,29 @@ struct problem_t {
     (void)this;
     return 0;
   }
+  template <typename XX, typename X>
+  void lf_second_order_deriv(XX&& lxx, X&& lx, x_const x) const {
+    (void)x;
+    lxx.setZero();
+    lx.setZero();
+  }
+
   auto l(index_t t, x_const x, u_const u) const -> scalar_t {
     (void)t;
     (void)x;
     (void)this;
     return 0.5 * c * u.squaredNorm();
+  }
+  template <typename XX, typename UX, typename UU, typename X, typename U>
+  void l_second_order_deriv(XX&& lxx, UX&& lux, UU&& luu, X&& lx, U&& lu, index_t t, x_const x, u_const u) const {
+    (void)t;
+    (void)x;
+    lxx.setZero();
+    lux.setZero();
+    luu.setIdentity();
+    luu *= c;
+    lx.setZero();
+    lu = c * u.transpose();
   }
 
   void difference(f_mut out, f_const start, f_const finish) const { m_dynamics.difference_out(out, start, finish); }
@@ -1037,292 +1359,8 @@ struct problem_t {
       ddp::derivative_storage_t<scalar_t, control_indexer_t, eq_indexer_t, state_indexer_t, dstate_indexer_t>;
   using trajectory_t = trajectory::trajectory_t<scalar_t, state_indexer_t, control_indexer_t>;
 
-  auto compute_derivatives(derivative_storage_t& derivs, trajectory_t const& traj) const {
-
-    derivs.lfx.setZero();
-    derivs.lfxx.setZero();
-
-    // clang-format off
-    auto rng = ranges::zip(
-          derivs.lx, derivs.lu, derivs.lxx, derivs.lux, derivs.luu,
-          derivs.f_val, derivs.fx, derivs.fu, derivs.fxx, derivs.fux, derivs.fuu,
-          derivs.eq_val, derivs.eq_x, derivs.eq_u, derivs.eq_xx, derivs.eq_ux, derivs.eq_uu,
-          traj);
-    // clang-format on
-
-    using iter = typename decltype(rng)::iterator;
-
-    constexpr index_t max_threads = 16;
-
-    index_t n_threads = std::min(max_threads, index_t{omp_get_num_procs()});
-    std::array<iter, max_threads> begin_arr;
-    std::array<iter, max_threads> end_arr;
-
-    {
-      index_t horizon = 1 + (*(--end(traj))).current_index() - (*begin(traj)).current_index();
-      index_t r = horizon % n_threads;
-
-      iter it = begin(rng);
-      for (index_t i = 0; i < n_threads; ++i) {
-        index_t n_iterations = horizon / n_threads + ((i < r) ? 1 : 0);
-
-        begin_arr[i] = it;
-        for (index_t j = 0; j < n_iterations; ++j) {
-          ++it;
-        }
-        end_arr[i] = it;
-      }
-      DDP_ASSERT((it == end(rng)));
-    }
-
-#pragma omp parallel num_threads(n_threads)
-    {
-      index_t thread_id = omp_get_thread_num();
-      DDP_ASSERT(thread_id >= 0);
-      DDP_ASSERT(thread_id < n_threads);
-
-      auto k = dynamics().acquire_workspace();
-
-      for (iter it = begin_arr[thread_id], it_end = end_arr[thread_id]; it != it_end; ++it) {
-        auto zipped = *it;
-        // clang-format off
-      DDP_BIND(auto&&, (
-          lx, lu, lxx, lux, luu,
-          f_v, fx, fu, fxx, fux, fuu,
-          eq_v, eq_x, eq_u, eq_xx, eq_ux, eq_uu,
-          xu), zipped);
-        // clang-format on
-
-        DDP_ASSERT(not xu.x().hasNaN());
-        DDP_ASSERT(not xu.x_next().hasNaN());
-        DDP_ASSERT(not xu.u().hasNaN());
-
-        auto t = xu.current_index();
-        auto x = xu.x();
-        auto u = xu.u();
-
-        lx.get().setZero();
-        lxx.get().setZero();
-        lux.get().setZero();
-        lu.get() = c * xu.u().transpose();
-        luu.get().setIdentity();
-        luu.get() *= c;
-
-        {
-          auto msg = fmt::format("  computing f  derivatives from thread {}", thread_id);
-          ddp::chronometer_t timer(msg.c_str());
-          k = dynamics().second_order_deriv(
-              fxx.get(),
-              fux.get(),
-              fuu.get(),
-              fx.get(),
-              fu.get(),
-              f_v.get(),
-              t,
-              x,
-              u,
-              DDP_MOVE(k));
-        }
-        {
-          auto msg = fmt::format("  computing eq derivatives from thread {}", thread_id);
-          ddp::chronometer_t timer(msg.c_str());
-          k = constraint().second_order_deriv(
-              eq_xx.get(),
-              eq_ux.get(),
-              eq_uu.get(),
-              eq_x.get(),
-              eq_u.get(),
-              eq_v.get(),
-              t,
-              x,
-              u,
-              DDP_MOVE(k));
-        }
-
-#if not defined(NDEBUG)
-        {
-          using vec_t = Eigen::Matrix<scalar_t, Eigen::Dynamic, 1>;
-          DDP_ASSERT(not eq_v.get().hasNaN());
-          DDP_ASSERT(not eq_x.get().hasNaN());
-          DDP_ASSERT(not eq_u.get().hasNaN());
-          DDP_ASSERT(not eq_xx.get().has_nan());
-          DDP_ASSERT(not eq_ux.get().has_nan());
-          DDP_ASSERT(not eq_uu.get().has_nan());
-
-          DDP_ASSERT(not fx.get().hasNaN());
-          DDP_ASSERT(not fu.get().hasNaN());
-          DDP_ASSERT(not fxx.get().has_nan());
-          DDP_ASSERT(not fux.get().has_nan());
-          DDP_ASSERT(not fuu.get().has_nan());
-
-          auto ne = eq_v.get().rows();
-
-          scalar_t l;
-          scalar_t l_;
-          auto f = f_v.get().eval();
-          auto f_ = f_v.get().eval();
-          auto eq = eq_v.get().eval();
-          auto eq_ = eq_v.get().eval();
-
-          scalar_t _dl1;
-          auto _df1 = eigen::make_matrix<scalar_t>(dynamics().dstate_dim());
-          auto _deq1 = eq_v.get().eval();
-
-          scalar_t _ddl1;
-          auto _ddf1 = eigen::make_matrix<scalar_t>(dynamics().dstate_dim());
-          vec_t _ddeq1{ne};
-
-          scalar_t _dddl1;
-          auto _dddf1 = eigen::make_matrix<scalar_t>(dynamics().dstate_dim());
-          vec_t _dddeq1{ne};
-
-          scalar_t _dl2;
-          auto _df2 = eigen::make_matrix<scalar_t>(dynamics().dstate_dim());
-          auto _deq2 = eq_v.get().eval();
-
-          scalar_t _ddl2;
-          auto _ddf2 = eigen::make_matrix<scalar_t>(dynamics().dstate_dim());
-          vec_t _ddeq2{ne};
-
-          scalar_t _dddl2;
-          auto _dddf2 = eigen::make_matrix<scalar_t>(dynamics().dstate_dim());
-          vec_t _dddeq2{ne};
-
-          auto* dl = &_dl1;
-          auto* df = &_df1;
-          auto* deq = &_deq1;
-
-          auto* ddl = &_ddl1;
-          auto* ddf = &_ddf1;
-          auto* ddeq = &_ddeq1;
-
-          auto* dddl = &_dddl1;
-          auto* dddf = &_dddf1;
-          auto* dddeq = &_dddeq1;
-
-          auto dx_ = eigen::make_matrix<scalar_t>(dynamics().dstate_dim());
-          dx_.setRandom();
-
-          auto du_ = eigen::make_matrix<scalar_t>(dynamics().dcontrol_dim(t));
-          du_.setRandom();
-
-          auto finite_diff_err = [&](scalar_t eps_x, scalar_t eps_u) {
-            auto dx = (dx_.operator*(eps_x)).eval();
-            auto du = (du_.operator*(eps_u)).eval();
-
-            auto x_ = x.eval();
-            auto u_ = u.eval();
-
-            dynamics().integrate_x(eigen::as_mut_view(x_), eigen::as_const_view(x), eigen::as_const_view(dx));
-            dynamics().integrate_u(eigen::as_mut_view(u_), t, eigen::as_const_view(u), eigen::as_const_view(du));
-
-            l = this->l(t, x, u);
-            k = eval_f_to(eigen::as_mut_view(f), t, x, u, DDP_MOVE(k));
-            k = eval_eq_to(eigen::as_mut_view(eq), t, x, u, DDP_MOVE(k));
-
-            l_ = this->l(t, eigen::as_const_view(x_), eigen::as_const_view(u_));
-            k = eval_f_to(eigen::as_mut_view(f_), t, eigen::as_const_view(x_), eigen::as_const_view(u_), DDP_MOVE(k));
-            k = eval_eq_to(eigen::as_mut_view(eq_), t, eigen::as_const_view(x_), eigen::as_const_view(u_), DDP_MOVE(k));
-
-            *dl = l_ - l;
-            dynamics().difference_out(eigen::as_mut_view(*df), eigen::as_const_view(f), eigen::as_const_view(f_));
-            constraint().difference_out(eigen::as_mut_view(*deq), eigen::as_const_view(eq), eigen::as_const_view(eq_));
-
-            *ddl = *dl - (lx.get() * dx + lu.get() * du).value();
-            *ddf = *df - (fx.get() * dx + fu.get() * du);
-            *ddeq = *deq - (eq_x.get() * dx + eq_u.get() * du);
-
-            *dddl = *ddl - (0.5 * dx.transpose() * lxx.get() * dx   //
-                            + 0.5 * du.transpose() * luu.get() * du //
-                            + du.transpose() * lux.get() * dx)
-                               .value();
-            *dddf = -*ddf;
-            *dddeq = -*ddeq;
-
-            ddp::add_second_order_term(*dddf, fxx.get(), fux.get(), fuu.get(), dx, du);
-            ddp::add_second_order_term(*dddeq, eq_xx.get(), eq_ux.get(), eq_uu.get(), dx, du);
-
-            *dddf = -*dddf;
-            *dddeq = -*dddeq;
-          };
-
-          scalar_t eps_x = 1e-30;
-          scalar_t eps_u = 1e-30;
-
-          scalar_t eps_factor = 0.1;
-
-          finite_diff_err(eps_x, eps_u);
-
-          dl = &_dl2;
-          df = &_df2;
-          deq = &_deq2;
-
-          ddl = &_ddl2;
-          ddf = &_ddf2;
-          ddeq = &_ddeq2;
-
-          dddl = &_dddl2;
-          dddf = &_dddf2;
-          dddeq = &_dddeq2;
-
-          finite_diff_err(eps_x * eps_factor, eps_u * eps_factor);
-
-          auto dl1 = _dl1;
-          auto dl2 = _dl2;
-          auto ddl1 = _ddl1;
-          auto ddl2 = _ddl2;
-          auto dddl1 = _dddl1;
-          auto dddl2 = _dddl2;
-
-          auto df1 = _df1.array();
-          auto df2 = _df2.array();
-          auto ddf1 = _ddf1.array();
-          auto ddf2 = _ddf2.array();
-          auto dddf1 = _dddf1.array();
-          auto dddf2 = _dddf2.array();
-
-          auto deq1 = _deq1.array();
-          auto deq2 = _deq2.array();
-          auto ddeq1 = _ddeq1.array();
-          auto ddeq2 = _ddeq2.array();
-          auto dddeq1 = _dddeq1.array();
-          auto dddeq2 = _dddeq2.array();
-
-          using std::fabs;
-          using std::pow;
-
-          auto eps = pow(std::numeric_limits<scalar_t>::epsilon(), 0.9);
-
-          DDP_EXPECT_MSG_ALL_OF(
-              (fmt::format("{}\n{}", dl1, dl2), (fabs(dl1) <= eps or fabs(dl2) <= 2 * eps_factor * fabs(dl1))),
-              (fmt::format("{}\n{}", ddl1, ddl2),
-               (fabs(ddl1) <= eps or fabs(ddl2) <= 2 * pow(eps_factor, 2) * fabs(ddl1))),
-              (fmt::format("{}\n{}", dddl1, dddl2),
-               (fabs(dddl1) <= eps or fabs(dddl2) <= 2 * pow(eps_factor, 3) * fabs(dddl1))));
-
-          for (index_t i = 0; i < df1.size(); ++i) {
-            DDP_EXPECT_MSG_ALL_OF(
-                (fmt::format("{}\n{}", df1[i], df2[i]),
-                 (fabs(df1[i]) <= eps or fabs(df2[i]) <= 2 * eps_factor * fabs(df1[i]))),
-                (fmt::format("{}\n{}", ddf1[i], ddf2[i]),
-                 (fabs(ddf1[i]) <= eps or fabs(ddf2[i]) <= 2 * pow(eps_factor, 2) * fabs(ddf1[i]))),
-                (fmt::format("{}\n{}", dddf1[i], dddf2[i]),
-                 (fabs(dddf1[i]) <= eps or fabs(dddf2[i]) <= 2 * pow(eps_factor, 3) * fabs(dddf1[i]))));
-          }
-
-          for (index_t i = 0; i < deq1.size(); ++i) {
-            DDP_EXPECT_MSG_ALL_OF(
-                (fmt::format("{}\n{}", deq1[i], deq2[i]),
-                 (fabs(deq1[i]) <= eps or fabs(deq2[i]) <= 2 * eps_factor * fabs(deq1[i]))),
-                (fmt::format("{}\n{}", ddeq1[i], ddeq2[i]),
-                 (fabs(ddeq1[i]) <= eps or fabs(ddeq2[i]) <= 2 * pow(eps_factor, 2) * fabs(ddeq1[i]))),
-                (fmt::format("{}\n{}", dddeq1[i], dddeq2[i]),
-                 (fabs(dddeq1[i]) <= eps or fabs(dddeq2[i]) <= 2 * pow(eps_factor, 3) * fabs(dddeq1[i]))));
-          }
-        }
-#endif
-      }
-    }
+  void compute_derivatives(derivative_storage_t& derivs, trajectory_t const& traj) const {
+    ddp::compute_derivatives(*this, derivs, traj);
   }
 
   auto name() const noexcept -> fmt::string_view { return m_dynamics.name(); }
@@ -1585,7 +1623,31 @@ struct multiple_shooting_t {
   void neutral_configuration(x_mut out) const { m_prob.neutral_configuration(out); }
 
   auto lf(x_const x) const -> scalar_t { return m_prob.lf(x); }
-  auto l(index_t t, x_const x, u_const u) const -> scalar_t { return m_prob.l(t, x, u); }
+  auto l(index_t t, x_const x, u_const u) const -> scalar_t {
+    DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, m_prob.control_dim(t)));
+    return m_prob.l(t, x, u_orig);
+  }
+  template <typename XX, typename X>
+  void lf_second_order_deriv(XX&& lxx, X&& lx, x_const x) const {
+    m_prob.lf_second_order_deriv(lxx, lx, x);
+  }
+  template <typename XX, typename UX, typename UU, typename X, typename U>
+  void l_second_order_deriv(XX&& lxx, UX&& lux, UU&& luu, X&& lx, U&& lu, index_t t, x_const x, u_const u) const {
+    DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row_mut(u, m_prob.control_dim(t)));
+    DDP_BIND(auto, (lu_orig, lu_slack), eigen::split_at_col_mut(lu, m_prob.control_dim(t)));
+    DDP_BIND(auto, (lux_orig, lux_slack), eigen::split_at_row_mut(lux, m_prob.control_dim(t)));
+    DDP_BIND(
+        auto,
+        (luu_orig_orig, luu_orig_slack, luu_slack_orig, luu_slack_slack),
+        eigen::split_at_mut(luu, m_prob.control_dim(t), m_prob.control_dim(t)));
+
+    lu_slack.setZero();
+    luu_slack_slack.setZero();
+    luu_slack_orig.setZero();
+    luu_orig_slack.setZero();
+    lux_slack.setZero();
+    m_prob.l_second_order_deriv(lxx, lux_orig, luu_orig_orig, lx, lu_orig, t, x, u_orig);
+  }
   void difference(f_mut out, f_const start, f_const finish) const { m_prob.difference(out, start, finish); }
   void d_difference_dfinish(fx_mut out, f_const start, f_const finish) const {
     m_prob.d_difference_dfinish(out, start, finish);
@@ -1616,6 +1678,14 @@ struct multiple_shooting_t {
       out_slack = u_slack;
     }
     return k;
+  }
+
+  using derivative_storage_t =
+      ddp::derivative_storage_t<scalar_t, dcontrol_indexer_t, eq_indexer_t, state_indexer_t, dstate_indexer_t>;
+  using trajectory_t = trajectory::trajectory_t<scalar_t, state_indexer_t, control_indexer_t>;
+
+  void compute_derivatives(derivative_storage_t& derivs, trajectory_t const& traj) const {
+    ddp::compute_derivatives(*this, derivs, traj);
   }
 
   auto name() const -> std::string { return std::string{"multi_shooting_"} + m_prob.name(); }
