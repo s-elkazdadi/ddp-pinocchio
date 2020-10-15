@@ -113,6 +113,19 @@ using u64 = std::uint64_t;
 
 namespace detail {
 
+template <typename T>
+auto to_owned(T s) -> std::string;
+
+template <>
+inline auto to_owned(std::string s) -> std::string {
+  return DDP_MOVE(s);
+}
+
+template <>
+inline auto to_owned(fmt::string_view s) -> std::string {
+  return {s.begin(), s.end()};
+}
+
 template <size_t I>
 void get() = delete;
 

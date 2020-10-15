@@ -1498,6 +1498,74 @@ struct multiple_shooting_t {
   };
   struct constraint_t {
     multiple_shooting_t const& m_parent;
+
+    using scalar_t = multiple_shooting_t::scalar_t;
+    using x_const = multiple_shooting_t::x_const;
+    using dx_const = multiple_shooting_t::dx_const;
+    using u_const = multiple_shooting_t::u_const;
+    using du_const = multiple_shooting_t::du_const;
+
+    using out_mut = multiple_shooting_t::f_mut;
+
+    using out_x_mut = multiple_shooting_t::fx_mut;
+    using out_u_mut = multiple_shooting_t::fu_mut;
+
+    using out_xx_mut = multiple_shooting_t::fxx_mut;
+    using out_ux_mut = multiple_shooting_t::fux_mut;
+    using out_uu_mut = multiple_shooting_t::fuu_mut;
+
+    using key = typename multiple_shooting_t::key;
+
+    auto orig() const noexcept -> orig_constraint_t { return m_parent.m_prob.constraint(); }
+
+    auto eq_idx() const -> eq_indexer_t { return indexing::row_concat(orig().eq_idx(), m_parent.m_slack_idx.clone()); }
+    auto eq_dim(index_t t) const -> typename eq_indexer_t::row_kind {
+      return eq_idx().rows(t) + m_parent.m_slack_idx.rows(t);
+    }
+
+    void integrate_x(x_mut out, x_const x, dx_const dx) const { m_parent.dynamics().integrate_x(out, x, dx); }
+    void integrate_u(u_mut out, index_t t, u_const u, u_const du) const {
+      m_parent.dynamics().integrate_u(out, t, u, du);
+    }
+    template <typename Out, typename In>
+    void difference_out(Out out, In start, In finish) const {
+      DDP_DEBUG_ASSERT_MSG_ALL_OF(          //
+          ("", out.rows() == start.rows()), //
+          ("", out.rows() == finish.rows()));
+      out = finish - start;
+    }
+
+    auto first_order_deriv( //
+        out_x_mut out_x,    //
+        out_u_mut out_u,    //
+        out_mut out,        //
+        index_t t,          //
+        x_const x,          //
+        u_const u,          //
+        key k               //
+    ) const -> key {
+      auto ne = orig().eq_dim(t);
+      auto nx = m_parent.dstate_dim();
+
+      DDP_BIND(auto, (out_x_orig, out_x_slack), eigen::split_at_mut(out_x, ne));
+      DDP_BIND(
+          auto,
+          (out_u_orig_orig, out_u_orig_slack, out_u_slack_orig, out_u_slack_slack),
+          eigen::split_at_mut(out_u, ne, nx));
+
+      DDP_BIND(auto, (out_orig, out_slack), eigen::split_at_mut(out, ne));
+
+      DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, nx));
+
+      out_u_orig_slack.setZero();
+      out_u_slack_orig.setZero();
+      out_u_slack_slack.setIdentity();
+      return orig().first_order_deriv(out_x_orig, out_u_orig_orig, out_orig, t, x, u_orig, DDP_MOVE(k));
+    }
+
+    auto eval_to(out_mut out, index_t t, x_const x, u_const u, key k) const -> key {
+      return m_parent.eval_eq_to(out, t, x, u, DDP_MOVE(k));
+    }
   };
 
   auto dynamics() const noexcept -> dynamics_t { return {*this}; }

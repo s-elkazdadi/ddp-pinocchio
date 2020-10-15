@@ -649,7 +649,7 @@ struct ddp_solver_t {
       scalar_t const& w,
       scalar_t const& n,
       scalar_t const& stopping_threshold) const -> mult_update_attempt_result_e {
-    std::string name = prob.name();
+    std::string name = detail::to_owned(prob.name());
     log_file_t primal_log{("/tmp/" + name + "_primal.dat").c_str()};
     log_file_t dual_log{("/tmp/" + DDP_MOVE(name) + "_dual.dat").c_str()};
 
@@ -739,7 +739,7 @@ struct ddp_solver_t {
   ddp_solver_t(ddp_solver_t const&) = delete;
   ddp_solver_t(ddp_solver_t&&) = delete;
   auto operator=(ddp_solver_t const&) -> ddp_solver_t& = delete;
-  auto operator=(ddp_solver_t&&) -> ddp_solver_t& = delete;
+  auto operator=(ddp_solver_t &&) -> ddp_solver_t& = delete;
 
   // clang-format off
   template <method M>
