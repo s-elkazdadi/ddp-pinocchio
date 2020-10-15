@@ -141,8 +141,9 @@ public:
       return (m_x_iter += n, m_val_iter += n, m_jac_iter += n, *this);
     }
     friend auto operator==(iterator_impl_t a, iterator_impl_t b) noexcept -> bool {
-      assert((a.m_val_iter == b.m_val_iter) == (a.m_jac_iter == b.m_jac_iter));
-      assert((a.m_val_iter == b.m_val_iter) == (a.m_x_iter == b.m_x_iter));
+      DDP_DEBUG_ASSERT_MSG_ALL_OF(
+          ("", (a.m_val_iter == b.m_val_iter) == (a.m_jac_iter == b.m_jac_iter)),
+          ("", (a.m_val_iter == b.m_val_iter) == (a.m_x_iter == b.m_x_iter)));
       return a.m_val_iter == b.m_val_iter;
     }
     auto operator*() const -> proxy_t { return {*m_x_iter, *m_val_iter, *m_jac_iter, m_prob}; }

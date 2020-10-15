@@ -25,8 +25,11 @@ struct trajectory_t {
 private:
   trajectory_t(x_mat_seq_t x_data, u_mat_seq_t u_data)
       : m_state_data(DDP_MOVE(x_data)), m_control_data(DDP_MOVE(u_data)) {
-    assert(m_state_data.m_idx.index_begin() == m_control_data.m_idx.index_begin());
-    assert(m_state_data.m_idx.index_end() == m_control_data.m_idx.index_end() + 1);
+    DDP_ASSERT_MSG_ALL_OF(
+        ("state and control sequences should have the same beginning",
+         m_state_data.m_idx.index_begin() == m_control_data.m_idx.index_begin()),
+        ("state sequence should last one time step longer than the control sequence",
+         m_state_data.m_idx.index_end() == m_control_data.m_idx.index_end() + 1));
   }
 
 public:

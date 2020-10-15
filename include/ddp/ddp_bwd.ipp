@@ -45,11 +45,15 @@ auto ddp_solver_t<Problem>::
       auto const pe = eq_mult.val();
       auto const pe_x = eq_mult.jac();
 
-      auto const tmp_ = (pe + mu * eq.val).eval();
-      auto const tmp2_ = (pe_x + mu * eq.x).eval();
+      // DDP_EXPECT_MSG_ALL_OF(("", pe.norm() == 0), ("", pe_x.norm() == 0));
+
+      auto const tmp_ = (pe + eq.val.operator*(mu)).eval();
+      auto const tmp2_ = (pe_x + eq.x.operator*(mu)).eval();
 
       auto const tmp = eigen::as_const_view(tmp_);
       auto const tmp2 = eigen::as_const_view(tmp2_);
+
+      bool const has_eq = tmp.rows() > 0;
 
       {
         using std::isfinite;
@@ -63,30 +67,40 @@ auto ddp_solver_t<Problem>::
       // clang-format off
       auto Q_x         = l.x.transpose().eval();                  auto Q_x_v = eigen::as_mut_view(Q_x);
       Q_x_v.noalias() += f.x.transpose() * V_x;
-      Q_x_v.noalias() += eq.x.transpose() * tmp;
-      Q_x_v.noalias() += pe_x.transpose() * eq.val;
+      if (has_eq) {
+        Q_x_v.noalias() += eq.x.transpose() * tmp;
+        Q_x_v.noalias() += pe_x.transpose() * eq.val;
+      }
 
       auto Q_u         = l.u.transpose().eval();                  auto Q_u_v = eigen::as_mut_view(Q_u);
       Q_u_v.noalias() += f.u.transpose() * V_x;
-      Q_u_v.noalias() += eq.u.transpose() * tmp;
+      if (has_eq) {
+        Q_u_v.noalias() += eq.u.transpose() * tmp;
+      }
 
       auto Q_xx         = l.xx.eval();                            auto Q_xx_v = eigen::as_mut_view(Q_xx);
       Q_xx_v.noalias() += f.x.transpose() * V_xx * f.x;
-      Q_xx_v.noalias() += eq.x.transpose() * tmp2;
-      Q_xx_v.noalias() += pe_x.transpose() * eq.x;
-      eq.xx.noalias_contract_add_outdim(Q_xx_v, pe);
+      if (has_eq) {
+        Q_xx_v.noalias() += eq.x.transpose() * tmp2;
+        Q_xx_v.noalias() += pe_x.transpose() * eq.x;
+        eq.xx.noalias_contract_add_outdim(Q_xx_v, tmp);
+      }
       f .xx.noalias_contract_add_outdim(Q_xx_v, v_x);
 
       auto Q_uu         = l.uu.eval();                            auto Q_uu_v = eigen::as_mut_view(Q_uu);
       Q_uu_v.noalias() += f.u.transpose() * V_xx * f.u;
-      Q_uu_v.noalias() +=  (eq.u.transpose() * eq.u).operator*(mu); // *see below for reason
-      eq.uu.noalias_contract_add_outdim(Q_uu_v, pe);
+      if (has_eq) {
+        Q_uu_v.noalias() +=  (eq.u.transpose() * eq.u).operator*(mu); // *see below for reason
+        eq.uu.noalias_contract_add_outdim(Q_uu_v, tmp);
+      }
       f .uu.noalias_contract_add_outdim(Q_uu_v, v_x);
 
       auto Q_ux         = l.ux.eval();                            auto Q_ux_v = eigen::as_mut_view(Q_ux);
       Q_ux_v.noalias() += f.u.transpose() * V_xx * f.x;
-      Q_ux_v.noalias() +=  eq.u.transpose() * tmp2;
-      eq.ux.noalias_contract_add_outdim(Q_ux_v, pe);
+      if (has_eq) {
+        Q_ux_v.noalias() +=  eq.u.transpose() * tmp2;
+        eq.ux.noalias_contract_add_outdim(Q_ux_v, tmp);
+      }
       f .ux.noalias_contract_add_outdim(Q_ux_v, v_x);
       // clang-format on
 

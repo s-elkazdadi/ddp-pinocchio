@@ -8,14 +8,6 @@
 #undef NDEBUG
 #endif
 
-#ifdef NDEBUG
-#undef NDEBUG
-#include <cassert>
-#define NDEBUG
-#else
-#include <cassert>
-#endif
-
 #include <initializer_list>
 
 #include <boost/preprocessor/cat.hpp>

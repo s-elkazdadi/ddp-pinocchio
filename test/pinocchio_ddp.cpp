@@ -27,7 +27,9 @@ auto main() -> int {
   using vec_t = Eigen::Matrix<scalar_t, -1, 1>;
 
   using model_t = pinocchio::model_t<scalar_t>;
-  auto model = model_t{"~/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf"};
+  auto model = model_t{
+      fmt::string_view{"~/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf"},
+      omp_get_num_procs()};
   auto nq = model.configuration_dim_c();
   auto nv = model.tangent_dim_c();
   constexpr static index_t horizon = 10;

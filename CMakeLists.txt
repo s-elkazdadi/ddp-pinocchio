@@ -72,6 +72,7 @@ include(cmake/conan.cmake)
 run_conan()
 
 find_package(PkgConfig REQUIRED)
+find_package(OpenMP REQUIRED)
 pkg_check_modules(
   urdfdom
   REQUIRED
@@ -101,6 +102,7 @@ target_link_libraries(
          CONAN_PKG::mpfr
          PkgConfig::urdfdom
          PkgConfig::pinocchio
+         OpenMP::OpenMP_CXX
 )
 target_include_directories(ddp PUBLIC include)
 

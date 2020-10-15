@@ -649,9 +649,9 @@ struct ddp_solver_t {
       scalar_t const& w,
       scalar_t const& n,
       scalar_t const& stopping_threshold) const -> mult_update_attempt_result_e {
-    fmt::string_view name = prob.name();
-    log_file_t primal_log{("/tmp/" + std::string{name.begin(), name.end()} + "_primal.dat").c_str()};
-    log_file_t dual_log{("/tmp/" + std::string{name.begin(), name.end()} + "_dual.dat").c_str()};
+    std::string name = prob.name();
+    log_file_t primal_log{("/tmp/" + name + "_primal.dat").c_str()};
+    log_file_t dual_log{("/tmp/" + DDP_MOVE(name) + "_dual.dat").c_str()};
 
     prob.compute_derivatives(derivatives, traj);
 
@@ -739,7 +739,7 @@ struct ddp_solver_t {
   ddp_solver_t(ddp_solver_t const&) = delete;
   ddp_solver_t(ddp_solver_t&&) = delete;
   auto operator=(ddp_solver_t const&) -> ddp_solver_t& = delete;
-  auto operator=(ddp_solver_t &&) -> ddp_solver_t& = delete;
+  auto operator=(ddp_solver_t&&) -> ddp_solver_t& = delete;
 
   // clang-format off
   template <method M>
@@ -760,7 +760,8 @@ struct ddp_solver_t {
     auto mults = zero_multipliers<M>();
     for (auto zipped : ranges::zip(mults.eq, traj)) {
       DDP_BIND(auto&&, (eq, xu), zipped);
-      eq.jac().setRandom();
+      eq.val().setZero();
+      eq.jac().setZero();
       eq.origin() = xu.x();
     }
 
@@ -774,35 +775,43 @@ struct ddp_solver_t {
     ctrl_fb = DDP_MOVE(bres.feedback);
 
     for (index_t iter = 0; iter < solver_parameters.max_iterations; ++iter) {
-      auto mult_update_rv = update_derivatives<M>( //
-          derivs,
-          ctrl_fb,
-          mults,
-          traj,
-          mu,
-          w,
-          n,
-          solver_parameters.optimality_stopping_threshold);
+      auto mult_update_rv =
+          (chronometer_t{"computing derivatives"},
+           update_derivatives<M>( //
+               derivs,
+               ctrl_fb,
+               mults,
+               traj,
+               mu,
+               w,
+               n,
+               solver_parameters.optimality_stopping_threshold));
 
-      switch (mult_update_rv) {
-      case mult_update_attempt_result_e::no_update: {
-        break;
-      }
-      case mult_update_attempt_result_e::update_failure: {
-        mu *= 10;
-        break;
-      }
-      case mult_update_attempt_result_e::update_success: {
-        auto opt_obj = optimality_obj(traj, mults, mu, derivs);
-        n = opt_obj / pow(mu, static_cast<scalar_t>(0.1L));
-        w /= pow(mu, static_cast<scalar_t>(1));
-        break;
-      }
-      case mult_update_attempt_result_e::optimum_attained:
-        return {DDP_MOVE(traj), DDP_MOVE(ctrl_fb)};
+      {
+        chronometer_t c{"updating multipliers"};
+        switch (mult_update_rv) {
+        case mult_update_attempt_result_e::no_update: {
+          break;
+        }
+        case mult_update_attempt_result_e::update_failure: {
+          mu *= 10;
+          break;
+        }
+        case mult_update_attempt_result_e::update_success: {
+          auto opt_obj = optimality_obj(traj, mults, mu, derivs);
+          n = opt_obj / pow(mu, static_cast<scalar_t>(0.1L));
+          w /= pow(mu, static_cast<scalar_t>(1));
+          break;
+        }
+        case mult_update_attempt_result_e::optimum_attained:
+          return {DDP_MOVE(traj), DDP_MOVE(ctrl_fb)};
+        }
       }
 
-      bres = backward_pass<M>(DDP_MOVE(ctrl_fb), traj, mults, reg, mu, derivs);
+      {
+        chronometer_t c{"backward pass"};
+        bres = backward_pass<M>(DDP_MOVE(ctrl_fb), traj, mults, reg, mu, derivs);
+      }
       mu = bres.mu;
       reg = bres.reg;
       fmt::print(
@@ -815,7 +824,10 @@ struct ddp_solver_t {
           w,
           n);
 
-      step = forward_pass<M>(new_traj, traj, mults, bres, true);
+      {
+        chronometer_t c{"forward_pass"};
+        step = forward_pass<M>(new_traj, traj, mults, bres, true);
+      }
       ctrl_fb = DDP_MOVE(bres.feedback);
       if (step >= 0.5) {
         reg /= 2;
@@ -824,7 +836,10 @@ struct ddp_solver_t {
         }
       }
 
-      swap(traj, new_traj);
+      {
+        chronometer_t c{"swap"};
+        swap(traj, new_traj);
+      }
 
       fmt::print(stdout, "step: {}\n", step);
       fmt::print(stdout, "eq: ");

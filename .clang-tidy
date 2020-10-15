@@ -16,6 +16,8 @@ Checks:          '*,-abseil-*,-fuchsia-*,-google-*,-llvm-*,-zircon-*,
                   -hicpp-noexcept-move,
                   -hicpp-special-member-functions,
                   -hicpp-vararg,
+
+                  -llvmlibc-callee-namespace,
                   -modernize-avoid-c-arrays,
                   -modernize-use-transparent-functors,
                   -readability-braces-around-statements,

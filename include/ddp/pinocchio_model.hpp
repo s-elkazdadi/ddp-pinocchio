@@ -61,21 +61,33 @@ private:
       fmt::string_view name2  //
   ) const noexcept;
   template <typename Out, typename In>
-  void d_integrate_transport_dq_or_dv(Out out_J, In in_J, const_view_t<Nq> q, const_view_t<Nv> v, bool dq) const
-      noexcept;
+  void
+  d_integrate_transport_dq_or_dv(Out out_J, In in_J, const_view_t<Nq> q, const_view_t<Nv> v, bool dq) const noexcept;
 
 public:
   struct key {
+    key() = default;
+
     key(key const&) = delete;
     key(key&& other) noexcept : m_parent{other.m_parent} { other.m_parent = nullptr; }
     auto operator=(key const&) -> key& = delete;
-    auto operator=(key&& other) -> key& = delete;
-    ~key();
+    auto operator=(key&& other) noexcept -> key& {
+      if (this != &other) {
+        destroy();
+        m_parent = other.m_parent;
+        other.m_parent = nullptr;
+      }
+      return *this;
+    }
+    ~key() { destroy(); }
+
+    explicit operator bool() { return m_parent != nullptr; }
 
   private:
+    void destroy();
     friend struct model_t;
-    explicit key(impl_data_t& ref) : m_parent{&ref} {};
-    impl_data_t* m_parent;
+    explicit key(impl_data_t& ref) noexcept : m_parent{&ref} {};
+    impl_data_t* m_parent = nullptr;
   };
 
   ~model_t() noexcept;
@@ -83,7 +95,7 @@ public:
   model_t(model_t&&) noexcept;
 
   auto operator=(model_t const&) -> model_t& = delete;
-  auto operator=(model_t &&) -> model_t& = delete;
+  auto operator=(model_t&&) -> model_t& = delete;
 
   auto model_name() const noexcept -> fmt::string_view;
 
@@ -169,24 +181,26 @@ public:
       const_view_t<Nq> q_finish           //
   ) const noexcept;
 
-  void dynamics_aba(                   //
+  auto dynamics_aba(                   //
       mut_view_t<Nv> out_acceleration, //
       const_view_t<Nq> q,              //
       const_view_t<Nv> v,              //
-      const_view_t<Nv> tau             //
-  ) const noexcept;
+      const_view_t<Nv> tau,            //
+      key k                            //
+  ) const noexcept -> key;
 
-  void d_dynamics_aba(                          //
+  auto d_dynamics_aba(                          //
       mut_view_t<Nv, Nv> out_acceleration_dq,   //
       mut_view_t<Nv, Nv> out_acceleration_dv,   //
       mut_view_t<Nv, Nv> out_acceleration_dtau, //
       const_view_t<Nq> q,                       //
       const_view_t<Nv> v,                       //
-      const_view_t<Nv> tau                      //
-  ) const noexcept;
+      const_view_t<Nv> tau,                     //
+      key k                                     //
+  ) const noexcept -> key;
 
-  auto frame_coordinates(index_t i, const_view_t<Nq> q) const noexcept -> Eigen::Matrix<scalar_t, 3, 1>;
-  void d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, const_view_t<Nq> q) const noexcept;
+  auto frame_coordinates(mut_view_t<3> out, index_t i, const_view_t<Nq> q, key k) const noexcept -> key;
+  auto d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, const_view_t<Nq> q, key k) const noexcept -> key;
   auto n_frames() const noexcept -> index_t;
   auto frame_name(index_t i) const noexcept -> fmt::string_view;
 

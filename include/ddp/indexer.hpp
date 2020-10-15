@@ -66,26 +66,28 @@ struct indexer_proxy_t {
   auto to_forward_iterator() const noexcept -> indexer_iter_t<Indexer_Ref>;
 };
 
-template <typename Indexer_Ref>
+template <typename Indexer_Ptr>
 struct indexer_iter_t {
-  using indexer_t = typename indexer_reference_traits<Indexer_Ref>::indexer_t;
-  using proxy_t = indexer_proxy_t<Indexer_Ref>;
+  using indexer_t = typename indexer_reference_traits<Indexer_Ptr>::indexer_t;
+  using proxy_t = indexer_proxy_t<Indexer_Ptr>;
 
   using reference = proxy_t;
   static constexpr access_e iter_category = indexer_t::random_access ? access_e::random : access_e::bidirectional;
   static constexpr bool random_access = indexer_t::random_access;
 
-  Indexer_Ref m_indexer;
+  Indexer_Ptr m_indexer;
   index_t m_current_index;
   index_t m_memory_offset;
 
-  indexer_iter_t(Indexer_Ref indexer, index_t current_index, index_t memory_offset) noexcept
+  indexer_iter_t(Indexer_Ptr indexer, index_t current_index, index_t memory_offset) noexcept
       : m_indexer{indexer}, m_current_index{current_index}, m_memory_offset{memory_offset} {
     DDP_ASSERT_MSG_ALL_OF(
         ("", m_current_index <= m_indexer->index_end()),
         ("", m_current_index >= m_indexer->index_begin()),
         ("", m_memory_offset >= 0));
   }
+
+  indexer_iter_t() = default;
 
   auto operator++() noexcept -> indexer_iter_t& {
     DDP_ASSERT(m_current_index + 1 <= m_indexer->index_end());
@@ -146,8 +148,8 @@ template <typename Idx, typename Impl = _::begin_end_impl<Idx>>
 auto end   (Idx const& idx) noexcept -> typename Impl::iterator         { return Impl::end(idx); }
 // clang-format on
 
-template <typename Indexer_Ref>
-auto indexer_proxy_t<Indexer_Ref>::to_forward_iterator() const noexcept -> indexer_iter_t<Indexer_Ref> {
+template <typename Indexer_Ptr>
+auto indexer_proxy_t<Indexer_Ptr>::to_forward_iterator() const noexcept -> indexer_iter_t<Indexer_Ptr> {
   return {m_indexer, m_current_index, m_memory_offset};
 }
 

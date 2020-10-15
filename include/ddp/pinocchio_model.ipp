@@ -11,7 +11,6 @@
 
 #include <new>
 #include <stdexcept>
-#include <mutex>
 #include <atomic>
 
 #if __cplusplus >= 201703L
@@ -32,7 +31,6 @@ namespace pinocchio {
 template <typename T, index_t Nq, index_t Nv>
 struct model_t<T, Nq, Nv>::impl_model_t {
   ::pinocchio::ModelTpl<scalar_t> m_impl;
-  std::mutex m_lock;
 };
 template <typename T, index_t Nq, index_t Nv>
 struct model_t<T, Nq, Nv>::impl_data_t {
@@ -98,9 +96,10 @@ namespace ddp {
 namespace pinocchio {
 
 template <typename T, index_t Nq, index_t Nv>
-model_t<T, Nq, Nv>::key::~key() {
+void model_t<T, Nq, Nv>::key::destroy() {
   if (m_parent != nullptr) {
     m_parent->m_available = true;
+    m_parent = nullptr;
   }
 }
 
@@ -129,9 +128,9 @@ template <typename T, index_t Nq, index_t Nv>
 template <typename Model_Builder>
 model_t<T, Nq, Nv>::model_t(Model_Builder&& model_builder, index_t n_parallel) noexcept(false) {
 
-  assert(n_parallel == 1); // TODO: multi-threading
-  assert(n_parallel > 0);
-  assert(n_parallel < 256);
+  DDP_ASSERT_MSG_ALL_OF( //
+      ("invalid parallelization parameter", n_parallel > 0),
+      ("invalid parallelization parameter", n_parallel < 256));
 
   m_num_data = n_parallel;
   m_model = static_cast<gsl::owner<impl_model_t*>>(boost::alignment::aligned_alloc( //
@@ -152,7 +151,7 @@ model_t<T, Nq, Nv>::model_t(Model_Builder&& model_builder, index_t n_parallel) n
 
   ::pinocchio::Model model_double{};
   static_cast<Model_Builder&&>(model_builder)(model_double);
-  m_model = new (m_model) impl_model_t{model_double.cast<scalar_t>(), {}};
+  m_model = new (m_model) impl_model_t{model_double.cast<scalar_t>()};
 
   for (index_t i = 0; i < m_num_data; ++i) {
     new (m_data + i) impl_data_t{::pinocchio::DataTpl<scalar_t>{m_model->m_impl}, {true}};
@@ -173,7 +172,9 @@ auto model_t<T, Nq, Nv>::all_joints_test_model(index_t n_parallel) noexcept(fals
 
 template <typename T, index_t Nq, index_t Nv>
 model_t<T, Nq, Nv>::~model_t() noexcept {
-  assert((m_model == nullptr) == (m_data == nullptr));
+  DDP_ASSERT(
+      "model and data should either be both valid or both invalid (moved-from state)",
+      (m_model == nullptr) == (m_data == nullptr));
 
   if (m_data != nullptr) {
     for (index_t i = 0; i < m_num_data; ++i) {
@@ -202,11 +203,15 @@ model_t<T, Nq, Nv>::model_t(model_t&& other) noexcept {
 
 template <typename T, index_t Nq, index_t Nv>
 auto model_t<T, Nq, Nv>::acquire_workspace() const noexcept -> key {
-  std::lock_guard<std::mutex> g{m_model->m_lock};
   for (index_t i = 0; i < m_num_data; ++i) {
-    if (m_data[i].m_available) {
-      m_data[i].m_available = false;
-      return key{m_data[i]};
+    std::atomic<bool>& available = m_data[i].m_available;
+
+    if (available) {
+      bool expected = true;
+      bool const changed = available.compare_exchange_strong(expected, false);
+      if (changed) {
+        return key{m_data[i]};
+      }
     }
   }
   DDP_ASSERT_MSG("no workspace available", false);
@@ -353,12 +358,13 @@ namespace ddp {
 namespace pinocchio {
 
 template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::dynamics_aba( //
+auto model_t<T, Nq, Nv>::dynamics_aba( //
     mut_view_t<Nv> out_acceleration,   //
     const_view_t<Nq> q,                //
     const_view_t<Nv> v,                //
-    const_view_t<Nv> tau               //
-) const noexcept {
+    const_view_t<Nv> tau,              //
+    key k                              //
+) const noexcept -> key {
 
   DDP_ASSERT_MSG_ALL_OF(
       ("output acceleration vector is not correctly sized", out_acceleration.rows() == m_tangent_dim),
@@ -367,23 +373,26 @@ void model_t<T, Nq, Nv>::dynamics_aba( //
       ("control vector is not correctly sized", tau.rows() == m_tangent_dim),
       ("invalid data", not q.hasNaN()),
       ("invalid data", not v.hasNaN()),
-      ("invalid data", not tau.hasNaN()));
+      ("invalid data", not tau.hasNaN()),
+      ("invalid workspace key", static_cast<void*>(k.m_parent) != nullptr));
 
-  key k = acquire_workspace();
   impl_data_t* data = k.m_parent;
   ::pinocchio::aba(m_model->m_impl, data->m_impl, q, v, tau);
   out_acceleration = data->m_impl.ddq;
+
+  return k;
 }
 
 template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::d_dynamics_aba(      //
+auto model_t<T, Nq, Nv>::d_dynamics_aba(      //
     mut_view_t<Nv, Nv> out_acceleration_dq,   //
     mut_view_t<Nv, Nv> out_acceleration_dv,   //
     mut_view_t<Nv, Nv> out_acceleration_dtau, //
     const_view_t<Nq> q,                       //
     const_view_t<Nv> v,                       //
-    const_view_t<Nv> tau                      //
-) const noexcept {
+    const_view_t<Nv> tau,                     //
+    key k                                     //
+) const noexcept -> key {
 
   DDP_ASSERT_MSG_ALL_OF(
       ("output acceleration jacobian with respect to the velocity has the wrong number of rows",
@@ -405,9 +414,10 @@ void model_t<T, Nq, Nv>::d_dynamics_aba(      //
 
       ("invalid data", not q.hasNaN()),
       ("invalid data", not v.hasNaN()),
-      ("invalid data", not tau.hasNaN()));
+      ("invalid data", not tau.hasNaN()),
 
-  key k = acquire_workspace();
+      ("invalid workspace key", static_cast<void*>(k.m_parent) != nullptr));
+
   impl_data_t* data = k.m_parent;
   ::pinocchio::computeABADerivatives(
       m_model->m_impl,
@@ -418,6 +428,8 @@ void model_t<T, Nq, Nv>::d_dynamics_aba(      //
       out_acceleration_dq,
       out_acceleration_dv,
       out_acceleration_dtau);
+
+  return k;
 }
 
 } // namespace pinocchio
@@ -436,23 +448,25 @@ namespace ddp {
 namespace pinocchio {
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::frame_coordinates(index_t i, const_view_t<Nq> q) const noexcept
-    -> Eigen::Matrix<scalar_t, 3, 1> {
+auto model_t<T, Nq, Nv>::frame_coordinates(mut_view_t<3> out, index_t i, const_view_t<Nq> q, key k) const noexcept
+    -> key {
   DDP_ASSERT_MSG_ALL_OF( //
       ("frame index must be in bounds", i >= 0),
       ("frame index must be in bounds", i < m_model->m_impl.nframes),
 
       ("configuration vector is not correctly sized", q.rows() == m_config_dim),
-      ("invalid data", not q.hasNaN()));
+      ("invalid data", not q.hasNaN()),
+      ("invalid workspace key", static_cast<void*>(k.m_parent) != nullptr));
 
-  key k = acquire_workspace();
   impl_data_t* data = k.m_parent;
   ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
-  return data->m_impl.oMf[static_cast<std::size_t>(i)].translation();
+  out = data->m_impl.oMf[static_cast<std::size_t>(i)].translation();
+  return k;
 };
 
 template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, const_view_t<Nq> q) const noexcept {
+auto model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, const_view_t<Nq> q, key k) const noexcept
+    -> key {
   DDP_ASSERT_MSG_ALL_OF( //
       ("frame index must be in bounds", i >= 0),
       ("frame index must be in bounds", i < m_model->m_impl.nframes),
@@ -460,9 +474,9 @@ void model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, c
       ("output constraint jacobian matrix is not correctly sized", out.cols() == m_tangent_dim),
 
       ("configuration vector is not correctly sized", q.rows() == m_config_dim),
-      ("invalid data", not q.hasNaN()));
+      ("invalid data", not q.hasNaN()),
+      ("invalid workspace key", static_cast<void*>(k.m_parent) != nullptr));
 
-  key k = acquire_workspace();
   impl_data_t* data = k.m_parent;
   out.setZero();
 
@@ -487,6 +501,7 @@ void model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, c
       ::pinocchio::LOCAL_WORLD_ALIGNED,
       w);
   out = w.template topRows<3>();
+  return k;
 };
 
 template <typename T, index_t Nq, index_t Nv>

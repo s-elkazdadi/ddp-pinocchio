@@ -34,10 +34,12 @@ struct tuple {
   template <index_t... Is>
   struct indexed_tuple<std::integer_sequence<index_t, Is...>> : tuple_leaf<Ts, Is>... {
     explicit indexed_tuple(Ts... args) : tuple_leaf<Ts, Is>{static_cast<Ts&&>(args)}... {}
+    indexed_tuple() = default;
   };
 
   indexed_tuple<make_index_sequence<DDP_VSIZEOF(Ts)>> _m_impl;
   tuple(Ts... args) noexcept : _m_impl{static_cast<Ts&&>(args)...} {}
+  tuple() noexcept = default;
 };
 
 template <typename... Ts>
@@ -72,6 +74,7 @@ struct zip_iterator_t {
   detail::tuple<Iters...> m_iters;
 
   zip_iterator_t(Iters... iters) noexcept : m_iters(DDP_MOVE(iters)...) {}
+  zip_iterator_t() = default;
 
   using difference_type = std::ptrdiff_t;
   using value_type = detail::tuple<typename std::iterator_traits<Iters>::value_type...>;
@@ -99,7 +102,7 @@ struct zip_iterator_t {
     bool const eq[] = {static_cast<bool>(detail::get<Is>(a.m_iters) == detail::get<Is>(b.m_iters))...};
     bool is_eq = detail::one_of(eq, DDP_VSIZEOF(Iters));
     if (is_eq) {
-      assert(detail::all_of(eq, DDP_VSIZEOF(Iters)));
+      DDP_DEBUG_ASSERT_MSG("iterators have different lengths", detail::all_of(eq, DDP_VSIZEOF(Iters)));
     }
 
     return is_eq;

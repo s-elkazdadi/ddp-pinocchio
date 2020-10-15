@@ -9,6 +9,11 @@ option(MATH_OPT "Enable safe-ish math optimizations" OFF)
 option(FAST_MATH_OPT "Enable unsafe math optimizations" OFF)
 option(USE_LIBCXX "Use the libc++ STL" OFF)
 
+option(TIME_TRACE "Enable -ftime-trace to generate time tracing .json files on clang" OFF)
+if(TIME_TRACE AND CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
+  add_compile_options("-ftime-trace")
+endif()
+
 if(USE_LLD)
   add_link_options("-fuse-ld=lld")
 elseif(USE_GOLD)

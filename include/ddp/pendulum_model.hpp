@@ -26,6 +26,10 @@ private:
   static constexpr long double g = 9.81L;
 
 public:
+  struct key {
+    explicit operator bool() { return true; }
+  };
+
   pendulum_model_t(scalar_t mass, scalar_t length) : m_mass{mass}, m_length{length} {
     DDP_ASSERT_MSG_ALL_OF(                       //
         ("mass should be positive", m_mass > 0), //
@@ -37,6 +41,8 @@ public:
 
   auto configuration_dim_c() const noexcept -> fix_index<1> { return {}; }
   auto tangent_dim_c() const noexcept -> fix_index<1> { return {}; }
+
+  auto acquire_workspace() const noexcept -> key { return {}; };
 
   void neutral_configuration(mut_view_t out_q) const noexcept { out_q[0] = 0; }
   void random_configuration(mut_view_t out_q) const noexcept {
@@ -102,31 +108,35 @@ public:
     out_v_dq_finish[0] = 1;
   }
 
-  void dynamics_aba(               //
+  auto dynamics_aba(               //
       mut_view_t out_acceleration, //
       const_view_t q,              //
       const_view_t v,              //
-      const_view_t tau             //
-  ) const noexcept {
+      const_view_t tau,            //
+      key k                        //
+  ) const noexcept -> key {
     (void)v;
     using std::sin;
     out_acceleration[0] = -g / m_length * sin(q[0]) + tau[0] / m_mass;
+    return k;
   }
 
-  void d_dynamics_aba(                  //
+  auto d_dynamics_aba(                  //
       mut_view_t out_acceleration_dq,   //
       mut_view_t out_acceleration_dv,   //
       mut_view_t out_acceleration_dtau, //
       const_view_t q,                   //
       const_view_t v,                   //
-      const_view_t tau                  //
-  ) const noexcept {
+      const_view_t tau,                 //
+      key k                             //
+  ) const noexcept -> key {
     (void)v;
     (void)tau;
     using std::cos;
     out_acceleration_dq[0] = -g / m_length * cos(q[0]);
     out_acceleration_dv[0] = 0;
     out_acceleration_dtau[0] = 1 / m_mass;
+    return k;
   }
 
   auto model_name() const noexcept -> fmt::string_view { return "pendulum"; }

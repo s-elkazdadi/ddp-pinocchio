@@ -33,7 +33,7 @@ struct finally_t {
   finally_t(finally_t const&) = delete;
   finally_t(finally_t&&) = delete;
   auto operator=(finally_t const&) -> finally_t& = delete;
-  auto operator=(finally_t &&) -> finally_t& = delete;
+  auto operator=(finally_t&&) -> finally_t& = delete;
   ~finally_t() { callback(); }
 };
 
@@ -47,14 +47,16 @@ void on_fail(long line, char const* file, char const* func, bool is_fatal) {
   auto&& clear = finally([&] { failed_asserts.clear(); });
   (void)clear;
 
-  print(stderr, fg(color::olive), "{:=<79}", "");
-  print(stderr, "\n");
-  print(stderr, fg(color::azure), "{}", failed_asserts.size());
-  print(stderr, " assertion{} ", failed_asserts.size() > 1 ? "s" : "");
-  print(stderr, fg(color::orange_red), "failed");
-  print(stderr, "\nin function:\n{}\n", func);
-  print(stderr, fg(color::gray), "{}:{}: ", file, line);
-  print(stderr, "\n");
+  std::string output;
+
+  output = DDP_MOVE(output) + format(fg(color::olive), "{:=<79}", "");
+  output = DDP_MOVE(output) + format("\n");
+  output = DDP_MOVE(output) + format(fg(color::azure), "{}", failed_asserts.size());
+  output = DDP_MOVE(output) + format(" assertion{} ", failed_asserts.size() > 1 ? "s" : "");
+  output = DDP_MOVE(output) + format(fg(color::orange_red), "failed");
+  output = DDP_MOVE(output) + format("\nin function:\n{}\n", func);
+  output = DDP_MOVE(output) + format(fg(color::gray), "{}:{}: ", file, line);
+  output = DDP_MOVE(output) + format("\n");
 
   char const* separator = "";
 
@@ -62,24 +64,24 @@ void on_fail(long line, char const* file, char const* func, bool is_fatal) {
     char const* newline = std::find(a.message.begin(), a.message.end(), '\n');
     bool multiline = newline != a.message.end();
 
-    print(stderr, separator);
+    output = DDP_MOVE(output) + format(separator);
 
-    print(stderr, fg(color::orange_red), "{}", is_fatal ? "fatal " : "");
-    print(stderr, "assertion ");
-    print(stderr, "`");
-    print(stderr, fg(color::azure), "{}", a.expr);
-    print(stderr, "'");
-    print(stderr, fg(color::orange_red), " failed:");
+    output = DDP_MOVE(output) + format(fg(color::orange_red), "{}", is_fatal ? "fatal " : "");
+    output = DDP_MOVE(output) + format("assertion ");
+    output = DDP_MOVE(output) + format("`");
+    output = DDP_MOVE(output) + format(fg(color::azure), "{}", a.expr);
+    output = DDP_MOVE(output) + format("'");
+    output = DDP_MOVE(output) + format(fg(color::orange_red), " failed:");
 
     if (not multiline) {
-      print(stderr, " {}", a.message);
+      output = DDP_MOVE(output) + format(" {}", a.message);
     } else {
       char const* b = a.message.begin();
       char const* e = newline;
 
       while (b != nullptr) {
 
-        print(stderr, "\n > {}", string_view{b, static_cast<size_t>(e - b)});
+        output = DDP_MOVE(output) + format("\n > {}", string_view{b, static_cast<size_t>(e - b)});
 
         if (e == a.message.end()) {
           b = nullptr;
@@ -90,14 +92,16 @@ void on_fail(long line, char const* file, char const* func, bool is_fatal) {
       }
     }
 
-    print(stderr, "\nassertion expands to: `");
-    print(stderr, fg(color::azure), "{}{}{}", a.lhs, a.op, a.rhs);
-    print(stderr, "'\n");
+    output = DDP_MOVE(output) + format("\nassertion expands to: `");
+    output = DDP_MOVE(output) + format(fg(color::azure), "{}{}{}", a.lhs, a.op, a.rhs);
+    output = DDP_MOVE(output) + format("'\n");
     separator = "\n";
   }
 
-  print(stderr, fg(color::olive), "{:=<79}", "");
-  print(stderr, "\n");
+  output = DDP_MOVE(output) + format(fg(color::olive), "{:=<79}", "");
+  output = DDP_MOVE(output) + format("\n");
+
+  print(stderr, output);
 }
 
 void on_expect_fail(long line, char const* file, char const* func) {
@@ -141,7 +145,7 @@ struct file_t {
   file_t(file_t const&) = delete;
   file_t(file_t&& other) noexcept : m_ptr{other.m_ptr} { other.m_ptr = nullptr; };
   auto operator=(file_t const&) -> file_t = delete;
-  auto operator=(file_t &&) -> file_t = delete;
+  auto operator=(file_t&&) -> file_t = delete;
 
   explicit file_t(char const* path, int buffering_mode = _IONBF) : m_ptr{std::fopen(path, "w")} {
     if (m_ptr == nullptr) {
