@@ -27,7 +27,9 @@ auto main() -> int {
   using vec_t = Eigen::Matrix<scalar_t, -1, 1>;
 
   using model_t = pinocchio::model_t<scalar_t>;
-  auto model = model_t{"~/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf"};
+  auto model = model_t{
+      fmt::string_view{"~/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf"},
+      omp_get_num_procs()};
   auto nq = model.configuration_dim_c();
   auto nv = model.tangent_dim_c();
   constexpr static index_t horizon = 10;
@@ -60,8 +62,10 @@ auto main() -> int {
     auto q0 = eigen::make_matrix<scalar_t>(nq);
     model.neutral_configuration(eigen::as_mut_view(q0));
 
-    vec_t q = model.frame_coordinates(model.n_frames() - 1, eigen::as_const_view(q0));
-    q.setZero();
+    vec_t q{3};
+    DDP_BIND(auto, (out_3, out_0), eigen::split_at_row_mut(q, fix_index<3>{}));
+    (void)out_0;
+    model.frame_coordinates(out_3, model.n_frames() - 1, eigen::as_const_view(q0), model.acquire_workspace());
     return q;
   }()};
 
@@ -109,7 +113,7 @@ auto main() -> int {
 
     auto derivs = solver.uninit_derivative_storage();
 
-    scalar_t const mu_init = 1e20;
+    scalar_t const mu_init = 1e10;
     scalar_t w = 1 / mu_init;
     scalar_t n = 1 / pow(mu_init, static_cast<scalar_t>(0.1L));
     scalar_t reg = 0;

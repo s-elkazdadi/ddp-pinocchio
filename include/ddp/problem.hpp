@@ -732,7 +732,7 @@ struct spatial_constraint_t {
   auto eval_to(out_mut out, index_t t, x_const x, u_const u, key k) const -> key {
     auto target = eigen::as_const_view(m_constraint_target_view[t]);
     if (target.rows() == 0) {
-      return;
+      return k;
     }
 
     (void)u;
@@ -740,6 +740,7 @@ struct spatial_constraint_t {
 
     DDP_BIND(auto, (q, v), eigen::split_at_row(x, nq));
     DDP_BIND(auto, (out_3, out_0), eigen::split_at_row_mut(out, fix_index<3>{}));
+    DDP_ASSERT(out_0.rows() == 0);
     (void)v;
 
     k = m_dynamics.m_model.frame_coordinates(out_3, m_frame_id, q, DDP_MOVE(k));
@@ -760,7 +761,7 @@ struct spatial_constraint_t {
     auto target = eigen::as_const_view(m_constraint_target_view[t]);
     DDP_ASSERT_MSG(fmt::format("at t = {}", t), target.rows() == out.rows());
     if (target.rows() == 0) {
-      return;
+      return k;
     }
 
     auto const& m_model = m_dynamics.m_model;
@@ -769,9 +770,13 @@ struct spatial_constraint_t {
     auto nv = m_model.tangent_dim_c();
 
     DDP_BIND(auto, (q, v), eigen::split_at_row(x, nq));
-    DDP_BIND(auto, (out_3, out_0), eigen::split_at_row_mut(out_x, fix_index<3>{}));
+    DDP_BIND(auto, (out_3x, out_0x), eigen::split_at_row_mut(out_x, fix_index<3>{}));
+    DDP_BIND(auto, (out_3, out_0), eigen::split_at_row_mut(out, fix_index<3>{}));
+
+    DDP_ASSERT(out_0x.rows() == 0);
     DDP_ASSERT(out_0.rows() == 0);
-    DDP_BIND(auto, (out_3q, out_3v), eigen::split_at_col_mut(out_3, nv));
+
+    DDP_BIND(auto, (out_3q, out_3v), eigen::split_at_col_mut(out_3x, nv));
 
     (void)v;
 
@@ -1485,6 +1490,7 @@ struct multiple_shooting_t {
         return k;
       }
 
+      DDP_ASSERT(u_slack.rows() == dstate_dim());
       DDP_BIND(auto, (fu_slack_x, fu_slack_0), eigen::split_at_col_mut(fu_slack, dstate_dim()));
       DDP_BIND(auto, (u_slack_x, u_slack_0), eigen::split_at_row(u_slack, state_dim()));
       DDP_ASSERT(fu_slack_0.cols() == 0);
@@ -1528,7 +1534,10 @@ struct multiple_shooting_t {
       DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, orig().control_dim(t)));
       DDP_BIND(auto, (du_orig, du_slack), eigen::split_at_row(du, orig().dcontrol_dim(t)));
       orig().integrate_u(out_orig, t, u_orig, du_orig);
-      out_slack = u_slack + du_slack;
+      if (u_slack.rows() > 0) {
+        DDP_ASSERT(u_slack.rows() == dstate_dim());
+        out_slack = u_slack + du_slack;
+      }
     }
 
     void d_integrate_x(out_x_mut, x_const x, dx_const dx) const;
@@ -1659,6 +1668,7 @@ struct multiple_shooting_t {
     if (u_slack.rows() == 0) {
       k = m_prob.dynamics().eval_to(x_out, t, x, u_orig, DDP_MOVE(k));
     } else {
+      DDP_ASSERT(u_slack.rows() == dstate_dim());
       auto _tmp = x_out.eval();
       auto tmp = eigen::as_mut_view(_tmp);
       k = m_prob.dynamics().eval_to(tmp, t, x, u_orig, DDP_MOVE(k));
@@ -1675,6 +1685,7 @@ struct multiple_shooting_t {
 
     k = m_prob.dynamics().eval_to(out_orig, t, x, u_orig, DDP_MOVE(k));
     if (u_slack.rows() > 0) {
+      DDP_ASSERT(u_slack.rows() == dstate_dim());
       out_slack = u_slack;
     }
     return k;

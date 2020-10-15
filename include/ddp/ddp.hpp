@@ -798,8 +798,10 @@ struct ddp_solver_t {
           break;
         }
         case mult_update_attempt_result_e::update_success: {
+          using std::pow;
           auto opt_obj = optimality_obj(traj, mults, mu, derivs);
-          n = opt_obj / pow(mu, static_cast<scalar_t>(0.1L));
+          auto opt_constr = optimality_constr(derivs);
+          n = opt_constr / pow(mu, static_cast<scalar_t>(0.1L));
           w /= pow(mu, static_cast<scalar_t>(1));
           break;
         }
