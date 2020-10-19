@@ -42,6 +42,7 @@ auto main() -> int {
     using vec3 = decltype(eigen::make_matrix<scalar_t>(fix_index<3>{}));
     vec3 m_target;
     auto eq_idx() const -> indexing::range_row_filter_t<indexing::regular_indexer_t<dyn_index>> {
+      (void)this;
       auto unfiltered = indexing::vec_regular_indexer(2, horizon + 2, dyn_index{3});
       return {unfiltered, horizon, horizon + 1};
     }
@@ -53,10 +54,6 @@ auto main() -> int {
       return {m_target.data(), m_target.rows(), m_target.cols()};
     }
   };
-  using dynamics_t = ddp::dynamics_t<model_t>;
-  using problem_t = ddp::problem_t<
-      dynamics_t,
-      constraint_advance_time_t<constraint_advance_time_t<spatial_constraint_t<model_t, constraint_t>>>>;
 
   auto eq_gen = constraint_t{[&] {
     auto q0 = eigen::make_matrix<scalar_t>(nq);
@@ -78,27 +75,36 @@ auto main() -> int {
     return x;
   }();
 
-  dynamics_t dy{model, 0.01, false};
-  problem_t prob{
+  auto dy = pinocchio_dynamics(model, 0.01, false);
+  auto prob_ = problem(
       0,
       horizon,
       1.0,
       dy,
-      constraint_advance_time(constraint_advance_time(
-          spatial_constraint_t<model_t, constraint_t>{dy, DDP_MOVE(eq_gen), model.n_frames() - 1})),
-  };
+      constraint_advance_time<2>(spatial_constraint(dy, DDP_MOVE(eq_gen), model.n_frames() - 1)));
+
+#if 1
+  auto prob = multi_shooting(prob_, indexing::periodic_row_filter(prob_.state_indexer(0, horizon), 3, 1));
+  auto u_idx = indexing::row_concat(indexing::vec_regular_indexer(0, horizon, nv), prob.m_slack_idx);
+#else
+  auto prob = prob_;
   auto u_idx = indexing::vec_regular_indexer(0, horizon, nv);
-  auto eq_idx = prob.m_constraint.eq_idx();
+#endif
+  using problem_t = decltype(prob);
+
+
+  auto eq_idx = prob.constraint().eq_idx();
 
   struct control_generator_t {
     using u_mat_t = eigen::matrix_from_idx_t<scalar_t, problem_t::control_indexer_t>;
     using x_mat_t = eigen::matrix_from_idx_t<scalar_t, problem_t::state_indexer_t>;
+
     problem_t::control_indexer_t const& m_u_idx;
     index_t m_current_index = 0;
     u_mat_t m_value = u_mat_t::Zero(m_u_idx.rows(m_current_index).value()).eval();
 
     auto operator()() const -> eigen::view_t<u_mat_t const> { return eigen::as_const_view(m_value); }
-    void next(eigen::view_t<x_mat_t const>) {
+    void next(eigen::view_t<x_mat_t const> /*unused*/) {
       ++m_current_index;
       m_value.resize(m_u_idx.rows(m_current_index).value());
     }
@@ -113,11 +119,8 @@ auto main() -> int {
 
     auto derivs = solver.uninit_derivative_storage();
 
-    scalar_t const mu_init = 1e10;
-    scalar_t w = 1 / mu_init;
-    scalar_t n = 1 / pow(mu_init, static_cast<scalar_t>(0.1L));
-    scalar_t reg = 0;
-    auto res = solver.solve<M>({200, 1e-80, mu_init, 0.0, w, n}, solver.make_trajectory(control_generator_t{u_idx}));
+    scalar_t const mu_init = 1e2;
+    auto res = solver.solve<M>({200, 1e-80, mu_init}, solver.make_trajectory(control_generator_t{u_idx}));
     DDP_BIND(auto&&, (traj, fb), res);
     (void)fb;
 

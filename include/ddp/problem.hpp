@@ -569,6 +569,12 @@ struct dynamics_t {
   bool m_second_order_finite_diff = true;
 };
 
+template <typename Model>
+auto pinocchio_dynamics(Model const& model, typename Model::scalar_t dt, bool use_second_order_finite_difference = true)
+    -> dynamics_t<Model> {
+  return {model, dt, use_second_order_finite_difference};
+}
+
 template <typename Constraint>
 struct constraint_advance_time_t {
   using scalar_t = typename Constraint::scalar_t;
@@ -608,8 +614,8 @@ struct constraint_advance_time_t {
   }
 
   auto eval_to(out_mut out, index_t t, x_const x, u_const u, key k) const -> key {
-    auto x_n = eigen::make_matrix<scalar_t>(m_dynamics.state_dim(), _1{}); // x_{t+1}
-    k = m_dynamics.eval_to(eigen::as_mut_view(x_n), t, x, u, DDP_MOVE(k));
+    auto x_n = eigen::make_matrix<scalar_t>(dynamics().state_dim(), _1{}); // x_{t+1}
+    k = dynamics().eval_to(eigen::as_mut_view(x_n), t, x, u, DDP_MOVE(k));
     k = m_constraint.eval_to(out, t + 1, eigen::as_const_view(x_n), u, DDP_MOVE(k));
     return k;
   }
@@ -627,21 +633,21 @@ struct constraint_advance_time_t {
       return k;
     }
 
-    auto nx = m_dynamics.state_dim();
-    auto nx_ = m_dynamics.dstate_dim();
+    auto nx = dynamics().state_dim();
+    auto nx_ = dynamics().dstate_dim();
 
     auto _x_n = eigen::make_matrix<scalar_t>(nx, _1{}); // x_{t+1}
     auto x_n = eigen::as_mut_view(_x_n);
 
     auto _fx_n = eigen::make_matrix<scalar_t>(nx_, nx_);
-    auto _fu_n = eigen::make_matrix<scalar_t>(nx_, m_dynamics.dcontrol_dim(t));
+    auto _fu_n = eigen::make_matrix<scalar_t>(nx_, dynamics().dcontrol_dim(t));
     auto fx_n = eigen::as_mut_view(_fx_n);
     auto fu_n = eigen::as_mut_view(_fu_n);
 
-    k = m_dynamics.first_order_deriv(fx_n, fu_n, x_n, t, x, u, DDP_MOVE(k));
+    k = dynamics().first_order_deriv(fx_n, fu_n, x_n, t, x, u, DDP_MOVE(k));
 
     auto _eq_n_x = eigen::make_matrix<scalar_t>(eigen::rows_c(out), nx_);
-    auto _eq_n_u = eigen::make_matrix<scalar_t>(eigen::rows_c(out), m_dynamics.dcontrol_dim(t + 1));
+    auto _eq_n_u = eigen::make_matrix<scalar_t>(eigen::rows_c(out), dynamics().dcontrol_dim(t + 1));
     auto eq_n_x = eigen::as_mut_view(_eq_n_x);
     auto eq_n_u = eigen::as_mut_view(_eq_n_u);
 
@@ -666,17 +672,45 @@ struct constraint_advance_time_t {
       u_const u, //
       key k      //
   ) const -> key {
-    return finite_diff_hessian_compute<constraint_advance_time_t>{*this, m_dynamics.second_order_finite_diff()}
+    return finite_diff_hessian_compute<constraint_advance_time_t>{*this, dynamics().second_order_finite_diff()}
         .second_order_deriv(out_xx, out_ux, out_uu, out_x, out_u, out, t, x, u, DDP_MOVE(k));
   }
 
   Constraint m_constraint;
-  dynamics_t m_dynamics;
+
+  auto dynamics() const DDP_DECLTYPE_AUTO(m_constraint.dynamics());
 };
 
-template <typename Constraint>
-auto constraint_advance_time(Constraint c) -> constraint_advance_time_t<Constraint> {
-  return {c, c.m_dynamics};
+namespace detail {
+
+template <index_t N>
+struct constraint_advance_time_impl {
+  template <typename Constraint>
+  using type = constraint_advance_time_t<typename constraint_advance_time_impl<N - 1>::template type<Constraint>>;
+
+  template <typename Constraint>
+  static auto run(Constraint c) -> type<Constraint> {
+    return {constraint_advance_time_impl<N - 1>::template run(DDP_MOVE(c))};
+  }
+};
+
+template <>
+struct constraint_advance_time_impl<0> {
+  template <typename Constraint>
+  using type = Constraint;
+
+  template <typename Constraint>
+  static auto run(Constraint c) -> type<Constraint> {
+    return c;
+  }
+};
+
+} // namespace detail
+
+template <index_t N = 1, typename Constraint>
+auto constraint_advance_time(Constraint c) ->
+    typename detail::constraint_advance_time_impl<N>::template type<Constraint> {
+  return detail::constraint_advance_time_impl<N>::template run<Constraint>(DDP_MOVE(c));
 }
 
 template <typename Model, typename Constraint_Target_View>
@@ -805,10 +839,18 @@ struct spatial_constraint_t {
         .second_order_deriv(out_xx, out_ux, out_uu, out_x, out_u, out, t, x, u, DDP_MOVE(k));
   }
 
+  auto dynamics() const -> dynamics_t const& { return m_dynamics; }
+
   dynamics_t m_dynamics;
   Constraint_Target_View m_constraint_target_view;
   index_t m_frame_id;
 };
+
+template <typename Dynamics, typename Constraint_Target_View>
+auto spatial_constraint(Dynamics d, Constraint_Target_View v, index_t frame_id)
+    -> spatial_constraint_t<typename Dynamics::model_t, Constraint_Target_View> {
+  return {d, v, frame_id};
+}
 
 template <typename Model, typename Constraint_Target_View>
 struct config_constraint_t {
@@ -818,7 +860,7 @@ struct config_constraint_t {
 
   using state_kind = typename dynamics_t::state_kind;
   using dstate_kind = typename dynamics_t::dstate_kind;
-  using control_kind = decltype(static_cast<model_t const*>(nullptr)->tangent_dim_c());
+  using control_kind = typename dynamics_t::control_kind;
   using eq_indexer_t = decltype(std::declval<Constraint_Target_View const&>().eq_idx());
 
   static constexpr index_t out_eigen_c =
@@ -933,6 +975,8 @@ struct config_constraint_t {
     return finite_diff_hessian_compute<config_constraint_t>{*this, m_dynamics.second_order_finite_diff()}
         .second_order_deriv(out_xx, out_ux, out_uu, out_x, out_u, out, t, x, u, DDP_MOVE(k));
   }
+
+  auto dynamics() const -> dynamics_t const& { return m_dynamics; }
 
   dynamics_t m_dynamics;
   Constraint_Target_View m_constraint_target_view;
@@ -1051,6 +1095,8 @@ void compute_derivatives(
 
 #if not defined(NDEBUG)
       {
+        auto msg = fmt::format("  checking all derivatives from thread {}", thread_id);
+        ddp::chronometer_t timer(msg.c_str());
         using vec_t = Eigen::Matrix<scalar_t, Eigen::Dynamic, 1>;
         DDP_ASSERT(not eq_v.get().hasNaN());
         DDP_ASSERT(not eq_x.get().hasNaN());
@@ -1217,29 +1263,30 @@ void compute_derivatives(
         auto eps = pow(std::numeric_limits<scalar_t>::epsilon(), 0.9);
 
         DDP_EXPECT_MSG_ALL_OF(
-            (fmt::format("{}\n{}", dl1, dl2), (fabs(dl1) <= eps or fabs(dl2) <= 2 * eps_factor * fabs(dl1))),
-            (fmt::format("{}\n{}", ddl1, ddl2),
+            (fmt::format("at t = {}\n{}\n{}", t, dl1, dl2),
+             (fabs(dl1) <= eps or fabs(dl2) <= 2 * eps_factor * fabs(dl1))),
+            (fmt::format("at t = {}\n{}\n{}", t, ddl1, ddl2),
              (fabs(ddl1) <= eps or fabs(ddl2) <= 2 * pow(eps_factor, 2) * fabs(ddl1))),
-            (fmt::format("{}\n{}", dddl1, dddl2),
+            (fmt::format("at t = {}\n{}\n{}", t, dddl1, dddl2),
              (fabs(dddl1) <= eps or fabs(dddl2) <= 2 * pow(eps_factor, 3) * fabs(dddl1))));
 
         for (index_t i = 0; i < df1.size(); ++i) {
           DDP_EXPECT_MSG_ALL_OF(
-              (fmt::format("{}\n{}", df1[i], df2[i]),
+              (fmt::format("at t = {}\n{}\n{}", t, df1[i], df2[i]),
                (fabs(df1[i]) <= eps or fabs(df2[i]) <= 2 * eps_factor * fabs(df1[i]))),
-              (fmt::format("{}\n{}", ddf1[i], ddf2[i]),
+              (fmt::format("at t = {}\n{}\n{}", t, ddf1[i], ddf2[i]),
                (fabs(ddf1[i]) <= eps or fabs(ddf2[i]) <= 2 * pow(eps_factor, 2) * fabs(ddf1[i]))),
-              (fmt::format("{}\n{}", dddf1[i], dddf2[i]),
+              (fmt::format("at t = {}\n{}\n{}", t, dddf1[i], dddf2[i]),
                (fabs(dddf1[i]) <= eps or fabs(dddf2[i]) <= 2 * pow(eps_factor, 3) * fabs(dddf1[i]))));
         }
 
         for (index_t i = 0; i < deq1.size(); ++i) {
           DDP_EXPECT_MSG_ALL_OF(
-              (fmt::format("{}\n{}", deq1[i], deq2[i]),
+              (fmt::format("at t = {}\n{}\n{}", t, deq1[i], deq2[i]),
                (fabs(deq1[i]) <= eps or fabs(deq2[i]) <= 2 * eps_factor * fabs(deq1[i]))),
-              (fmt::format("{}\n{}", ddeq1[i], ddeq2[i]),
+              (fmt::format("at t = {}\n{}\n{}", t, ddeq1[i], ddeq2[i]),
                (fabs(ddeq1[i]) <= eps or fabs(ddeq2[i]) <= 2 * pow(eps_factor, 2) * fabs(ddeq1[i]))),
-              (fmt::format("{}\n{}", dddeq1[i], dddeq2[i]),
+              (fmt::format("at t = {}\n{}\n{}", t, dddeq1[i], dddeq2[i]),
                (fabs(dddeq1[i]) <= eps or fabs(dddeq2[i]) <= 2 * pow(eps_factor, 3) * fabs(dddeq1[i]))));
         }
       }
@@ -1302,6 +1349,8 @@ struct problem_t {
 
   auto state_dim() const -> state_kind { return m_dynamics.state_dim(); }
   auto dstate_dim() const noexcept -> dstate_kind { return m_dynamics.dstate_dim(); }
+  auto control_dim(index_t t) const -> control_kind { return m_dynamics.control_dim(t); }
+  auto dcontrol_dim(index_t t) const -> control_kind { return m_dynamics.dcontrol_dim(t); }
 
   auto state_indexer(index_t begin, index_t end) const -> state_indexer_t {
     return m_dynamics.state_indexer(begin, end);
@@ -1377,6 +1426,12 @@ struct problem_t {
   constraint_t m_constraint;
 };
 
+template <typename Dynamics, typename Eq_Constraint>
+auto problem(index_t begin, index_t end, typename Dynamics::scalar_t cost_reg, Dynamics dyn, Eq_Constraint eq)
+    -> problem_t<Dynamics, Eq_Constraint> {
+  return {begin, end, cost_reg, DDP_MOVE(dyn), DDP_MOVE(eq)};
+}
+
 template <typename Problem, typename Slack_Idx>
 struct multiple_shooting_t {
   using problem_t = Problem;
@@ -1403,28 +1458,29 @@ struct multiple_shooting_t {
   using x_mut = typename problem_t::x_mut;
   using x_const = typename problem_t::x_const;
   using dx_const = typename problem_t::dx_const;
-  using u_mut = eigen::view_t<eigen::matrix_from_idx_t<scalar_t, control_indexer_t> const>;
-  using u_const = eigen::view_t<eigen::matrix_from_idx_t<scalar_t, control_indexer_t>>;
-  using du_const = eigen::view_t<eigen::matrix_from_idx_t<scalar_t, dcontrol_indexer_t>>;
+  using u_mut = eigen::view_t<eigen::matrix_from_idx_t<scalar_t, control_indexer_t>>;
+  using u_const = eigen::view_t<eigen::matrix_from_idx_t<scalar_t, control_indexer_t> const>;
+  using du_const = eigen::view_t<eigen::matrix_from_idx_t<scalar_t, dcontrol_indexer_t> const>;
 
-  using f_const = typename problem_t::out_const;
-  using f_mut = typename problem_t::out_mut;
-  using df_mut = typename problem_t::dout_mut;
+  using f_const = typename problem_t::f_const;
+  using f_mut = typename problem_t::f_mut;
+  using df_mut = typename problem_t::df_mut;
 
-  using fx_mut = typename problem_t::out_x_mut;
-  using fu_mut = eigen::
-      matrix_from_idx_t<scalar_t, typename indexing::outer_prod_result<dstate_indexer_t, control_indexer_t>::type>;
+  using fx_mut = typename problem_t::fx_mut;
+  using fu_mut = eigen::view_t<eigen::matrix_from_idx_t<
+      scalar_t,
+      typename indexing::outer_prod_result<dstate_indexer_t, control_indexer_t>::type>>;
 
-  using fxx_mut = typename problem_t::out_xx_mut;
+  using fxx_mut = typename problem_t::fxx_mut;
   using fux_mut = tensor::tensor_view_t<scalar_t, dstate_kind, dcontrol_kind, dstate_kind>;
   using fuu_mut = tensor::tensor_view_t<scalar_t, dstate_kind, dcontrol_kind, dcontrol_kind>;
 
   using eq_mut = eigen::view_t<eigen::matrix_from_idx_t<scalar_t, eq_indexer_t>>;
 
-  using eq_x_mut =
-      eigen::matrix_from_idx_t<scalar_t, typename indexing::outer_prod_result<eq_indexer_t, dstate_indexer_t>::type>;
-  using eq_u_mut =
-      eigen::matrix_from_idx_t<scalar_t, typename indexing::outer_prod_result<eq_indexer_t, control_indexer_t>::type>;
+  using eq_x_mut = eigen::view_t<
+      eigen::matrix_from_idx_t<scalar_t, typename indexing::outer_prod_result<eq_indexer_t, dstate_indexer_t>::type>>;
+  using eq_u_mut = eigen::view_t<
+      eigen::matrix_from_idx_t<scalar_t, typename indexing::outer_prod_result<eq_indexer_t, control_indexer_t>::type>>;
 
   using eq_xx_mut = tensor::tensor_view_t<scalar_t, eq_kind, dstate_kind, dstate_kind>;
   using eq_ux_mut = tensor::tensor_view_t<scalar_t, eq_kind, dcontrol_kind, dstate_kind>;
@@ -1461,7 +1517,7 @@ struct multiple_shooting_t {
     auto control_dim(index_t t) const DDP_DECLTYPE_AUTO(m_parent.control_dim(t));
     auto dcontrol_dim(index_t t) const DDP_DECLTYPE_AUTO(m_parent.dcontrol_dim(t));
 
-    auto acquire_workspace() const noexcept -> key { return orig().dynamics().acquire_workspace(); }
+    auto acquire_workspace() const noexcept -> key { return orig().acquire_workspace(); }
 
     void neutral_configuration(x_mut out) const { orig().neutral_configuration(out); }
     void difference_out(x_mut out, x_const start, x_const finish) const { orig().difference_out(out, start, finish); }
@@ -1485,12 +1541,12 @@ struct multiple_shooting_t {
       DDP_BIND(auto, (fu_orig, fu_slack), eigen::split_at_col_mut(fu, orig().dcontrol_dim(t)));
       DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, orig().control_dim(t)));
 
-      k = orig().first_order_deriv(fx, fu_orig, f, t, x, u_orig, DDP_MOVE(k));
       if (u_slack.rows() == 0) {
+        k = orig().first_order_deriv(fx, fu_orig, f, t, x, u_orig, DDP_MOVE(k));
         return k;
       }
 
-      DDP_ASSERT(u_slack.rows() == dstate_dim());
+      DDP_ASSERT(u_slack.rows() == dstate_dim().value());
       DDP_BIND(auto, (fu_slack_x, fu_slack_0), eigen::split_at_col_mut(fu_slack, dstate_dim()));
       DDP_BIND(auto, (u_slack_x, u_slack_0), eigen::split_at_row(u_slack, state_dim()));
       DDP_ASSERT(fu_slack_0.cols() == 0);
@@ -1523,8 +1579,9 @@ struct multiple_shooting_t {
         u_const u,           //
         key k                //
     ) const -> key {
-      return finite_diff_hessian_compute<dynamics_t>{*this, orig().second_order_finite_diff()}
-          .second_order_deriv(fxx, fux, fuu, fx, fu, f, t, x, u, DDP_MOVE(k));
+      k = finite_diff_hessian_compute<dynamics_t>{*this, orig().second_order_finite_diff()}
+              .second_order_deriv(fxx, fux, fuu, fx, fu, f, t, x, u, DDP_MOVE(k));
+      return k;
     }
     auto second_order_finite_diff() const noexcept -> bool { return orig().second_order_finite_diff(); }
 
@@ -1535,7 +1592,7 @@ struct multiple_shooting_t {
       DDP_BIND(auto, (du_orig, du_slack), eigen::split_at_row(du, orig().dcontrol_dim(t)));
       orig().integrate_u(out_orig, t, u_orig, du_orig);
       if (u_slack.rows() > 0) {
-        DDP_ASSERT(u_slack.rows() == dstate_dim());
+        DDP_ASSERT(u_slack.rows() == dstate_dim().value());
         out_slack = u_slack + du_slack;
       }
     }
@@ -1592,22 +1649,45 @@ struct multiple_shooting_t {
         key k               //
     ) const -> key {
       auto ne = orig().eq_dim(t);
-      auto nx = m_parent.dstate_dim();
+      auto nu = m_parent.dynamics().orig().dcontrol_dim(t);
 
-      DDP_BIND(auto, (out_x_orig, out_x_slack), eigen::split_at_mut(out_x, ne));
+      DDP_BIND(auto, (out_x_orig, out_x_slack), eigen::split_at_row_mut(out_x, ne));
       DDP_BIND(
           auto,
           (out_u_orig_orig, out_u_orig_slack, out_u_slack_orig, out_u_slack_slack),
-          eigen::split_at_mut(out_u, ne, nx));
+          eigen::split_at_mut(out_u, ne, nu));
 
-      DDP_BIND(auto, (out_orig, out_slack), eigen::split_at_mut(out, ne));
+      DDP_BIND(auto, (out_orig, out_slack), eigen::split_at_row_mut(out, ne));
 
-      DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, nx));
+      DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, nu));
+
+      if (out_slack.rows() > 0) {
+        out_slack = u_slack;
+      }
 
       out_u_orig_slack.setZero();
       out_u_slack_orig.setZero();
       out_u_slack_slack.setIdentity();
-      return orig().first_order_deriv(out_x_orig, out_u_orig_orig, out_orig, t, x, u_orig, DDP_MOVE(k));
+
+      out_x_slack.setZero();
+      k = orig().first_order_deriv(out_x_orig, out_u_orig_orig, out_orig, t, x, u_orig, DDP_MOVE(k));
+      return k;
+    }
+
+    auto second_order_deriv( //
+        out_xx_mut fxx,      //
+        out_ux_mut fux,      //
+        out_uu_mut fuu,      //
+        out_x_mut fx,        //
+        out_u_mut fu,        //
+        out_mut f,           //
+        index_t t,           //
+        x_const x,           //
+        u_const u,           //
+        key k                //
+    ) const -> key {
+      return finite_diff_hessian_compute<constraint_t>{*this, orig().dynamics().second_order_finite_diff()}
+          .second_order_deriv(fxx, fux, fuu, fx, fu, f, t, x, u, DDP_MOVE(k));
     }
 
     auto eval_to(out_mut out, index_t t, x_const x, u_const u, key k) const -> key {
@@ -1642,7 +1722,7 @@ struct multiple_shooting_t {
   }
   template <typename XX, typename UX, typename UU, typename X, typename U>
   void l_second_order_deriv(XX&& lxx, UX&& lux, UU&& luu, X&& lx, U&& lu, index_t t, x_const x, u_const u) const {
-    DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row_mut(u, m_prob.control_dim(t)));
+    DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, m_prob.control_dim(t)));
     DDP_BIND(auto, (lu_orig, lu_slack), eigen::split_at_col_mut(lu, m_prob.control_dim(t)));
     DDP_BIND(auto, (lux_orig, lux_slack), eigen::split_at_row_mut(lux, m_prob.control_dim(t)));
     DDP_BIND(
@@ -1663,29 +1743,39 @@ struct multiple_shooting_t {
   }
 
   auto eval_f_to(x_mut x_out, index_t t, x_const x, u_const u, key k = {}) const -> key {
+    if (!k) {
+      k = dynamics().acquire_workspace();
+    }
     DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, m_prob.control_dim(t)));
 
     if (u_slack.rows() == 0) {
       k = m_prob.dynamics().eval_to(x_out, t, x, u_orig, DDP_MOVE(k));
     } else {
-      DDP_ASSERT(u_slack.rows() == dstate_dim());
-      auto _tmp = x_out.eval();
-      auto tmp = eigen::as_mut_view(_tmp);
-      k = m_prob.dynamics().eval_to(tmp, t, x, u_orig, DDP_MOVE(k));
+      DDP_ASSERT(u_slack.rows() == dstate_dim().value());
+
       DDP_BIND(auto, (u_slack_x, u_slack_0), eigen::split_at_row(u_slack, dstate_dim()));
       DDP_ASSERT(u_slack_0.rows() == 0);
+
+      auto _tmp = x_out.eval();
+      auto tmp = eigen::as_mut_view(_tmp);
+
+      k = m_prob.dynamics().eval_to(tmp, t, x, u_orig, DDP_MOVE(k));
       dynamics().integrate_x(x_out, eigen::as_const_view(tmp), u_slack_x);
     }
     return k;
   }
 
   auto eval_eq_to(eq_mut eq_out, index_t t, x_const x, u_const u, key k = {}) const -> key {
-    DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, m_prob.control_dim(t)));
-    DDP_BIND(auto, (out_orig, out_slack), eigen::split_at_row(eq_out, m_prob.constraint().eq_dim(t)));
+    if (!k) {
+      k = dynamics().acquire_workspace();
+    }
 
-    k = m_prob.dynamics().eval_to(out_orig, t, x, u_orig, DDP_MOVE(k));
+    DDP_BIND(auto, (u_orig, u_slack), eigen::split_at_row(u, m_prob.control_dim(t)));
+    DDP_BIND(auto, (out_orig, out_slack), eigen::split_at_row_mut(eq_out, m_prob.constraint().eq_dim(t)));
+
+    k = m_prob.eval_eq_to(out_orig, t, x, u_orig, DDP_MOVE(k));
     if (u_slack.rows() > 0) {
-      DDP_ASSERT(u_slack.rows() == dstate_dim());
+      DDP_ASSERT(u_slack.rows() == dstate_dim().value());
       out_slack = u_slack;
     }
     return k;
@@ -1699,10 +1789,18 @@ struct multiple_shooting_t {
     ddp::compute_derivatives(*this, derivs, traj);
   }
 
-  auto name() const -> std::string { return std::string{"multi_shooting_"} + m_prob.name(); }
+  auto name() const -> std::string {
+    auto n = m_prob.name();
+    return "multi_shooting_" + std::string{n.begin(), n.end()};
+  }
   problem_t m_prob;
   slack_indexer_t m_slack_idx;
 };
+
+template <typename Problem, typename Slack_Idx>
+auto multi_shooting(Problem p, Slack_Idx idx) -> multiple_shooting_t<Problem, Slack_Idx> {
+  return {DDP_MOVE(p), DDP_MOVE(idx)};
+}
 
 } // namespace ddp
 

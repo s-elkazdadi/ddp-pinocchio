@@ -43,10 +43,46 @@ template <typename Scalar>
 struct solver_parameters_t {
   index_t max_iterations;
   Scalar optimality_stopping_threshold;
-  Scalar mu;
-  Scalar reg;
-  Scalar w;
+  Scalar mu_init;
+};
+
+template <typename Scalar>
+struct regularization_t {
+
+  void increase_reg() {
+    m_factor = std::max(Scalar{1}, m_factor) * m_factor_update;
+
+    if (m_reg == 0) {
+      m_reg = m_min_value;
+    } else {
+      m_reg *= m_factor;
+    }
+  }
+
+  void decrease_reg() {
+    m_factor = std::min(Scalar{1}, m_factor) / m_factor_update;
+    m_reg *= m_factor;
+
+    if (m_reg <= m_min_value) {
+      m_reg = 0;
+    }
+  }
+
+  auto operator*() const -> Scalar { return m_reg; }
+
+  Scalar m_reg;
+  Scalar m_factor;
+  Scalar const m_factor_update;
+  Scalar const m_min_value;
+};
+
+template <typename Scalar>
+struct optimization_state_t {
+  regularization_t<Scalar> reg;
   Scalar n;
+  Scalar w;
+  Scalar initial_opt_obj;
+  Scalar initial_opt_constr;
 };
 
 template <typename Scalar, typename Control_Idx, typename Eq_Idx, typename State_Idx, typename D_State_Idx>
@@ -131,13 +167,13 @@ struct derivative_storage_t {
 #define DDP_GET_ITER(Class_Name, Name, Ret_Type, Parent_Access_Prefix, Members_Seq)                                    \
     friend auto Name(Class_Name const& s) -> Ret_Type {                                                                \
       return {                                                                                                         \
-          DDP_APPLY_BEGIN_END(_,                                                                                      \
-              (s.parent.Parent_Access_Prefix, Name),                                                                \
+          DDP_APPLY_BEGIN_END(_,                                                                                       \
+              (s.parent.Parent_Access_Prefix, Name),                                                                   \
               BOOST_PP_IDENTITY(BOOST_PP_SEQ_HEAD(Members_Seq))()                                                      \
             )                                                                                                          \
           BOOST_PP_SEQ_FOR_EACH(                                                                                       \
-              DDP_COMMA_APPLY_BEGIN_END,                                                                              \
-              (s.parent.Parent_Access_Prefix, Name),                                                                \
+              DDP_COMMA_APPLY_BEGIN_END,                                                                               \
+              (s.parent.Parent_Access_Prefix, Name),                                                                   \
               BOOST_PP_SEQ_TAIL(Members_Seq)                                                                           \
             )                                                                                                          \
       };                                                                                                               \
@@ -373,13 +409,6 @@ struct ddp_solver_t {
   };
 
   using control_feedback_t = detail::matrix_seq::affine_vector_function_seq_t<problem_t, control_indexer_t>;
-
-  template <method M>
-  struct backward_pass_result_t {
-    control_feedback_t feedback;
-    scalar_t mu;
-    scalar_t reg;
-  };
 
   template <method M>
   auto zero_multipliers() const -> typename multiplier_sequence<M>::type {
@@ -648,7 +677,7 @@ struct ddp_solver_t {
       scalar_t const& mu,
       scalar_t const& w,
       scalar_t const& n,
-      scalar_t const& stopping_threshold) const -> mult_update_attempt_result_e {
+      scalar_t const& stopping_threshold) const -> detail::tuple<mult_update_attempt_result_e, scalar_t, scalar_t> {
     std::string name = detail::to_owned(prob.name());
     log_file_t primal_log{("/tmp/" + name + "_primal.dat").c_str()};
     log_file_t dual_log{("/tmp/" + DDP_MOVE(name) + "_dual.dat").c_str()};
@@ -672,7 +701,11 @@ struct ddp_solver_t {
         opt_constr);
 
     if (opt_constr < stopping_threshold and opt_obj < stopping_threshold) {
-      return mult_update_attempt_result_e::optimum_attained;
+      return {
+          mult_update_attempt_result_e::optimum_attained,
+          opt_obj,
+          opt_constr,
+      };
     }
 
     if (opt_obj < w) {
@@ -687,12 +720,24 @@ struct ddp_solver_t {
           p_eq.val() += mu * (eq.val + eq.u * fb.val());
           p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
         }
-        return mult_update_attempt_result_e::update_success;
+        return {
+            mult_update_attempt_result_e::update_success,
+            opt_obj,
+            opt_constr,
+        };
       } else {
-        return mult_update_attempt_result_e::update_failure;
+        return {
+            mult_update_attempt_result_e::update_failure,
+            opt_obj,
+            opt_constr,
+        };
       }
     } else {
-      return mult_update_attempt_result_e::no_update;
+      return {
+          mult_update_attempt_result_e::no_update,
+          opt_obj,
+          opt_constr,
+      };
     }
   }
 
@@ -739,7 +784,7 @@ struct ddp_solver_t {
   ddp_solver_t(ddp_solver_t const&) = delete;
   ddp_solver_t(ddp_solver_t&&) = delete;
   auto operator=(ddp_solver_t const&) -> ddp_solver_t& = delete;
-  auto operator=(ddp_solver_t &&) -> ddp_solver_t& = delete;
+  auto operator=(ddp_solver_t&&) -> ddp_solver_t& = delete;
 
   // clang-format off
   template <method M>
@@ -748,14 +793,11 @@ struct ddp_solver_t {
       trajectory_t                   initial_trajectory
   ) const -> detail::tuple<trajectory_t, control_feedback_t> {
     // clang-format on
-    auto derivs = uninit_derivative_storage();
+    auto derivatives = uninit_derivative_storage();
     auto& traj = initial_trajectory;
     auto new_traj = traj.clone();
 
-    auto reg = solver_parameters.reg;
-    auto mu = solver_parameters.mu;
-    auto w = solver_parameters.w;
-    auto n = solver_parameters.n;
+    regularization_t<scalar_t> reg{0, 1, 2, 1e-5};
 
     auto mults = zero_multipliers<M>();
     for (auto zipped : ranges::zip(mults.eq, traj)) {
@@ -767,25 +809,34 @@ struct ddp_solver_t {
 
     auto ctrl_fb = control_feedback_t{u_idx, prob};
 
-    prob.compute_derivatives(derivs, traj);
-    auto bres = backward_pass<M>(DDP_MOVE(ctrl_fb), traj, mults, reg, mu, derivs);
+    prob.compute_derivatives(derivatives, traj);
 
-    mu = bres.mu;
-    auto step = forward_pass<M>(new_traj, traj, mults, bres, true);
-    ctrl_fb = DDP_MOVE(bres.feedback);
+    scalar_t mu = solver_parameters.mu_init;
+
+    auto previous_opt_constr = optimality_constr(derivatives);
+
+    scalar_t w = 1 / mu;
+    scalar_t n = 1 / pow(mu, static_cast<scalar_t>(0.1L));
+
+    backward_pass<M>(ctrl_fb, reg, mu, traj, mults, derivatives);
+
+    scalar_t step = forward_pass<M>(new_traj, traj, mults, ctrl_fb, mu, true);
 
     for (index_t iter = 0; iter < solver_parameters.max_iterations; ++iter) {
-      auto mult_update_rv =
+      DDP_BIND(
+          auto,
+          (mult_update_rv, opt_obj, opt_constr),
           (chronometer_t{"computing derivatives"},
            update_derivatives<M>( //
-               derivs,
+               derivatives,
                ctrl_fb,
                mults,
                traj,
                mu,
                w,
                n,
-               solver_parameters.optimality_stopping_threshold));
+               solver_parameters.optimality_stopping_threshold)));
+      (void)opt_obj;
 
       {
         chronometer_t c{"updating multipliers"};
@@ -794,15 +845,20 @@ struct ddp_solver_t {
           break;
         }
         case mult_update_attempt_result_e::update_failure: {
-          mu *= 10;
+          using std::pow;
+          fmt::print("desired new mu {}\n", pow(mu / (previous_opt_constr / opt_constr), 1 / scalar_t{1 - 0.5}));
+          mu = 10 * std::max(     //
+                        std::min( //
+                            pow(mu / (previous_opt_constr / opt_constr), scalar_t{1.0 / (1.0 - scalar_t{0.5})}),
+                            mu * scalar_t{1e5}),
+                        mu);
           break;
         }
         case mult_update_attempt_result_e::update_success: {
           using std::pow;
-          auto opt_obj = optimality_obj(traj, mults, mu, derivs);
-          auto opt_constr = optimality_constr(derivs);
           n = opt_constr / pow(mu, static_cast<scalar_t>(0.5L));
           w /= pow(mu, static_cast<scalar_t>(1));
+          previous_opt_constr = opt_constr;
           break;
         }
         case mult_update_attempt_result_e::optimum_attained:
@@ -812,42 +868,33 @@ struct ddp_solver_t {
 
       {
         chronometer_t c{"backward pass"};
-        bres = backward_pass<M>(DDP_MOVE(ctrl_fb), traj, mults, reg, mu, derivs);
+        backward_pass<M>(ctrl_fb, reg, mu, traj, mults, derivatives);
       }
-      mu = bres.mu;
-      reg = bres.reg;
       fmt::print(
           stdout,
           "====================================================================================================\n"
           "iter: {:5}   mu: {:13}   reg: {:13}   w: {:13}   n: {:13}\n",
           iter,
           mu,
-          reg,
+          *reg,
           w,
           n);
 
       {
         chronometer_t c{"forward_pass"};
-        step = forward_pass<M>(new_traj, traj, mults, bres, true);
+        step = forward_pass<M>(new_traj, traj, mults, ctrl_fb, mu, true);
       }
-      ctrl_fb = DDP_MOVE(bres.feedback);
       if (step >= 0.5) {
-        reg /= 2;
-        if (reg < 1e-5) {
-          reg = 0;
-        }
+        reg.decrease_reg();
       }
 
-      {
-        chronometer_t c{"swap"};
-        swap(traj, new_traj);
-      }
+      swap(traj, new_traj);
 
       fmt::print(stdout, "step: {}\n", step);
       fmt::print(stdout, "eq: ");
 
       fmt::string_view sep = "";
-      for (auto eq : derivs.eq()) {
+      for (auto eq : derivatives.eq()) {
         if (eq.val.size() > 0) {
           fmt::print("{}{}", sep, eq.val.norm());
           sep = ", ";
@@ -861,21 +908,22 @@ struct ddp_solver_t {
 
   // clang-format off
   template <method M>
-  auto backward_pass(
-      control_feedback_t&&                            ctrl_fb,
+  void backward_pass(
+      control_feedback_t&                             ctrl_fb,
+      regularization_t<scalar_t>&                     regularization,
+      scalar_t&                                       mu,
       trajectory_t const&                             current_traj,
       typename multiplier_sequence<M>::type const&    mults,
-      scalar_t                                        regularization,
-      scalar_t                                        mu,
       derivative_storage_t const&                     derivatives
-  ) const -> backward_pass_result_t<M>;
+  ) const;
 
   template <method M>
   auto forward_pass(
       trajectory_t&                                   new_traj_storage,
       trajectory_t const&                             reference_traj,
       typename multiplier_sequence<M>::type const&    old_mults,
-      backward_pass_result_t<M> const&                backward_pass_result,
+      control_feedback_t const&                       feedback,
+      scalar_t                                        mu,
       bool                                            do_linesearch = true
   ) const -> scalar_t;
 

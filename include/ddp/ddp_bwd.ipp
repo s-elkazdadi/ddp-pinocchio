@@ -8,16 +8,16 @@ namespace ddp {
 
 template <typename Problem>
 template <method M>
-auto ddp_solver_t<Problem>::
+void ddp_solver_t<Problem>::
     // clang-format off
   backward_pass(
-      control_feedback_t&&                            ctrl_fb,
+      control_feedback_t&                             ctrl_fb,
+      regularization_t<scalar_t>&                     regularization,
+      scalar_t&                                       mu,
       trajectory_t const&                             current_traj,
       typename multiplier_sequence<M>::type const&    mults,
-      scalar_t                                        regularization,
-      scalar_t                                        mu,
       derivative_storage_t const&                     derivatives
-  ) const -> backward_pass_result_t<M>
+  ) const
 {
   // clang-format on
   bool success = false;
@@ -44,8 +44,6 @@ auto ddp_solver_t<Problem>::
 
       auto const pe = eq_mult.val();
       auto const pe_x = eq_mult.jac();
-
-      // DDP_EXPECT_MSG_ALL_OF(("", pe.norm() == 0), ("", pe_x.norm() == 0));
 
       auto const tmp_ = (pe + eq.val.operator*(mu)).eval();
       auto const tmp2_ = (pe_x + eq.x.operator*(mu)).eval();
@@ -118,33 +116,9 @@ auto ddp_solver_t<Problem>::
 
       auto I_u = decltype(Q_uu)::Identity(Q_uu.rows(), Q_uu.rows());
 
-      auto const fact = ((Q_uu + regularization * I_u).eval()).llt();
+      auto const fact = ((Q_uu + *regularization * I_u).eval()).llt();
       if (fact.info() == Eigen::NumericalIssue) {
-        if (regularization < mu) {
-          regularization = mu;
-        }
-        mu *= 2;
-        regularization *= 2;
-        fmt::print("t  : {}\n", t);
-        fmt::print("mu : {}\n", mu);
-        fmt::print("reg: {}\n", regularization);
-        fmt::print("Quu:\n{}\n\n", Q_uu);
-        fmt::print("Vxx:\n{}\n\n", V_xx);
-        fmt::print("fu.T Vxx fu:\n{}\n\n", f.u.transpose() * V_xx * f.u);
-        fmt::print("mu * eq_u.T eq_u\n{}\n\n", (eq.u.transpose() * eq.u).operator*(mu));
-
-        auto Q_uu_ = Q_uu;
-        auto Q_uu_v_ = eigen::as_mut_view(Q_uu_);
-        {
-          Q_uu_.setZero();
-          eq.uu.noalias_contract_add_outdim(Q_uu_v_, tmp);
-          fmt::print("(p + mu eq).T eq_uu:\n{}\n\n", Q_uu);
-        }
-        {
-          Q_uu_.setZero();
-          f.uu.noalias_contract_add_outdim(Q_uu_v_, v_x);
-          fmt::print("vx.T f_uu:\n{}\n\n", Q_uu);
-        }
+        regularization.increase_reg();
         break;
       }
 
@@ -170,7 +144,6 @@ auto ddp_solver_t<Problem>::
       }
     }
   }
-  return {DDP_MOVE(ctrl_fb), DDP_MOVE(mu), DDP_MOVE(regularization)};
 }
 
 } // namespace ddp

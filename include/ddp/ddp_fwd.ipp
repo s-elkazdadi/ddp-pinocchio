@@ -13,7 +13,8 @@ auto ddp_solver_t<Problem>::
       trajectory_t&                                   new_traj_storage,
       trajectory_t const&                             reference_traj,
       typename multiplier_sequence<M>::type const&    old_mults,
-      backward_pass_result_t<M> const&                backward_pass_result,
+      control_feedback_t const&                       feedback,
+      scalar_t                                        mu,
       bool                                            do_linesearch
   ) const -> scalar_t {
   // clang-format on
@@ -23,7 +24,7 @@ auto ddp_solver_t<Problem>::
   if (do_linesearch) {
     costs_old_traj.resize(index_end() - index_begin() + 1);
     costs_new_traj.resize(index_end() - index_begin() + 1);
-    cost_seq_aug(eigen::as_mut_view(costs_old_traj), reference_traj, old_mults, backward_pass_result.mu);
+    cost_seq_aug(eigen::as_mut_view(costs_old_traj), reference_traj, old_mults, mu);
   }
 
   scalar_t step = 1;
@@ -36,7 +37,7 @@ auto ddp_solver_t<Problem>::
       break;
     }
 
-    for (auto zipped : ddp::ranges::zip(new_traj_storage, reference_traj, backward_pass_result.feedback)) {
+    for (auto zipped : ddp::ranges::zip(new_traj_storage, reference_traj, feedback)) {
       DDP_BIND(auto&&, (xu_new, xu_old, fb), zipped);
       index_t t = xu_new.current_index();
 
@@ -51,7 +52,7 @@ auto ddp_solver_t<Problem>::
     }
 
     if (do_linesearch) {
-      cost_seq_aug(eigen::as_mut_view(costs_new_traj), new_traj_storage, old_mults, backward_pass_result.mu);
+      cost_seq_aug(eigen::as_mut_view(costs_new_traj), new_traj_storage, old_mults, mu);
 
       if ((costs_new_traj - costs_old_traj).sum() <= 0) {
         success = true;
