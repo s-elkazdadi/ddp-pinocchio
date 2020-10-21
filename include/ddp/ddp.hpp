@@ -96,17 +96,17 @@ struct derivative_storage_t {
       scalar_t,
       fix_index<1>,
       typename dstate_indexer_t::row_kind,
-      Eigen::RowMajor,
       fix_index<1>,
-      typename dstate_indexer_t::max_row_kind>;
+      typename dstate_indexer_t::max_row_kind,
+      Eigen::RowMajor>;
 
   using lfxx_t = eigen::matrix_t<
       scalar_t,
       typename dstate_indexer_t::row_kind,
       typename dstate_indexer_t::row_kind,
-      Eigen::ColMajor,
       typename dstate_indexer_t::row_kind,
-      typename dstate_indexer_t::max_row_kind>;
+      typename dstate_indexer_t::max_row_kind,
+      Eigen::ColMajor>;
 
   template <typename L, typename R>
   using prod_t = typename indexing::outer_prod_result<L, R>::type;

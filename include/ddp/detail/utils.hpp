@@ -5,7 +5,6 @@
 #include <cstddef>
 
 #ifdef NDEBUG
-#undef NDEBUG
 #endif
 
 #include <initializer_list>
@@ -88,7 +87,7 @@ struct chronometer_t {
   chronometer_t(chronometer_t const&) = delete;
   chronometer_t(chronometer_t&&) = delete;
   auto operator=(chronometer_t const&) -> chronometer_t& = delete;
-  auto operator=(chronometer_t &&) -> chronometer_t& = delete;
+  auto operator=(chronometer_t&&) -> chronometer_t& = delete;
 
   explicit chronometer_t(char const* message, log_file_t file = log_file_t{"/tmp/chrono.log"});
   ~chronometer_t();
@@ -268,6 +267,15 @@ DDP_COMPARISON_CHECK(check_eq, assert_eq, N == M, n.value() == m.value());
 
 namespace eigen {
 
+template <int Rows, int Cols>
+struct default_options : std::integral_constant<
+                             int,
+                             ((Rows == 1 and Cols != 1) //
+                                  ? Eigen::RowMajor
+                                  : (Cols == 1 and Rows != 1) //
+                                        ? (Eigen::ColMajor)
+                                        : EIGEN_DEFAULT_MATRIX_STORAGE_ORDER_OPTION)> {};
+
 template <typename T>
 using view_t = Eigen::Map<T, Eigen::Unaligned, Eigen::OuterStride<Eigen::Dynamic>>;
 
@@ -275,9 +283,9 @@ template <
     typename T,
     typename Rows,
     typename Cols,
-    int Options = Eigen::ColMajor,
     typename Max_Rows = Rows,
-    typename Max_Cols = Cols>
+    typename Max_Cols = Cols,
+    int Options = default_options<Rows::value_at_compile_time, Cols::value_at_compile_time>::value>
 using matrix_t = Eigen::Matrix<
     T,
     Rows::value_at_compile_time,
@@ -286,36 +294,30 @@ using matrix_t = Eigen::Matrix<
     Max_Rows::value_at_compile_time,
     Max_Cols::value_at_compile_time>;
 
-template <typename T, typename Rows, typename Cols, int Options, typename Max_Rows, typename Max_Cols>
+template <
+    typename T,
+    typename Rows,
+    typename Cols,
+    typename Max_Rows,
+    typename Max_Cols,
+    int Options = default_options<Rows::value_at_compile_time, Cols::value_at_compile_time>::value>
 struct matrix_view {
-  using type = view_t<Eigen::Matrix<
-      T,
-      Rows::value_at_compile_time,
-      Cols::value_at_compile_time,
-      Options,
-      Max_Rows::value_at_compile_time,
-      Max_Cols::value_at_compile_time>>;
+  using type = view_t<matrix_t<T, Rows, Cols, Max_Rows, Max_Cols, Options>>;
 };
 
 template <typename T, typename Rows, typename Cols, int Options, typename Max_Rows, typename Max_Cols>
-struct matrix_view<T const, Rows, Cols, Options, Max_Rows, Max_Cols> {
-  using type = view_t<Eigen::Matrix<
-      T,
-      Rows::value_at_compile_time,
-      Cols::value_at_compile_time,
-      Options,
-      Max_Rows::value_at_compile_time,
-      Max_Cols::value_at_compile_time> const>;
+struct matrix_view<T const, Rows, Cols, Max_Rows, Max_Cols, Options> {
+  using type = view_t<matrix_t<T, Rows, Cols, Max_Rows, Max_Cols, Options> const>;
 };
 
 template <
     typename T,
     typename Rows,
     typename Cols,
-    int Options = Eigen::ColMajor,
     typename Max_Rows = Rows,
-    typename Max_Cols = Cols>
-using matrix_view_t = typename matrix_view<T, Rows, Cols, Options, Max_Rows, Max_Cols>::type;
+    typename Max_Cols = Cols,
+    int Options = default_options<Rows::value_at_compile_time, Cols::value_at_compile_time>::value>
+using matrix_view_t = typename matrix_view<T, Rows, Cols, Max_Rows, Max_Cols, Options>::type;
 
 template <typename T>
 struct type_to_size
@@ -328,12 +330,7 @@ template <
     typename T,
     typename Indexer,
     int Options =
-        (Indexer::row_kind::value_at_compile_time == 1 and Indexer::col_kind::value_at_compile_time != 1)
-            ? Eigen::RowMajor
-            : (Indexer::col_kind::value_at_compile_time == 1 and Indexer::row_kind::value_at_compile_time != 1)
-                  ? (Eigen::ColMajor)
-                  : EIGEN_DEFAULT_MATRIX_STORAGE_ORDER_OPTION //
-    >
+        default_options<Indexer::row_kind::value_at_compile_time, Indexer::col_kind::value_at_compile_time>::value>
 using matrix_from_idx_t = Eigen::Matrix<
     T,
     Indexer::row_kind::value_at_compile_time,
@@ -501,15 +498,6 @@ auto prod(Ts const&... args) noexcept -> decltype(detail::sum_impl<(DDP_VSIZEOF(
   return detail::sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(args...);
 }
 
-#define DDP_EIGEN_STORAGE_ORDER(...)                                                                                   \
-  (__VA_ARGS__::ColsAtCompileTime ==                                                                                   \
-   1) /**************************************************************************************************************/ \
-      ? Eigen::ColMajor                                                                                                \
-      : (__VA_ARGS__::RowsAtCompileTime ==                                                                             \
-                 1 /******************************************************************************************/        \
-             ? Eigen::RowMajor                                                                                         \
-             : __VA_ARGS__::IsRowMajor ? Eigen::RowMajor : Eigen::ColMajor)
-
 template <typename T>
 auto as_mut_view(T&& mat) noexcept                                                          //
     -> view_t<                                                                              //
@@ -544,31 +532,14 @@ template <
     typename T,
     typename Rows,
     typename Cols = fix_index<1>,
-    int Options = Rows::value_at_compile_time != 1
-                      ? Eigen::ColMajor
-                      : Cols::value_at_compile_time == 1 ? Eigen::ColMajor : Eigen::RowMajor,
     typename Max_Rows = Rows,
-    typename Max_Cols = Cols>
+    typename Max_Cols = Cols,
+    int Options = default_options<Rows::value_at_compile_time, Cols::value_at_compile_time>::value>
 auto make_matrix(Rows rows, Cols cols = {}, Max_Rows = {}, Max_Cols = {}) //
-    -> Eigen::Matrix<                                                     //
-        T,                                                                //
-        Rows::value_at_compile_time,                                      //
-        Cols::value_at_compile_time,                                      //
-        Options,                                                          //
-        Max_Rows::value_at_compile_time,                                  //
-        Max_Cols::value_at_compile_time                                   //
-        > {
-  DDP_ASSERT(rows.value() > 0);
-  DDP_ASSERT(cols.value() > 0);
-  Eigen::Matrix<                       //
-      T,                               //
-      Rows::value_at_compile_time,     //
-      Cols::value_at_compile_time,     //
-      Options,                         //
-      Max_Rows::value_at_compile_time, //
-      Max_Cols::value_at_compile_time  //
-      >
-      retval{rows.value(), cols.value()};
+    -> matrix_t<T, Rows, Cols, Max_Rows, Max_Cols, Options> {
+  DDP_ASSERT(rows.value() >= 0);
+  DDP_ASSERT(cols.value() >= 0);
+  matrix_t<T, Rows, Cols, Max_Rows, Max_Cols, Options> retval{rows.value(), cols.value()};
   retval.setZero();
   return retval;
 }

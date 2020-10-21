@@ -485,10 +485,9 @@ auto model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, c
 
   if (nv.value() > workspace.cols()) {
     workspace.resize(6, nv.value());
-    workspace.setZero();
   } else if (nv.value() != workspace.cols()) {
-    workspace.setZero();
   }
+  workspace.setZero();
 
   Eigen::Map<decltype(workspace)> w{workspace.data(), 6, nv.value()};
 

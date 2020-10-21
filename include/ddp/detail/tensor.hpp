@@ -1,7 +1,7 @@
 #ifndef TENSOR_HPP_PTZWQRYY
 #define TENSOR_HPP_PTZWQRYY
 
-#include "../indexer.hpp"
+#include "ddp/indexer.hpp"
 #include <functional>
 #include <memory>
 
