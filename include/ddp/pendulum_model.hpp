@@ -36,16 +36,16 @@ public:
         ("length should be positive", m_length > 0));
   }
 
-  auto configuration_dim() const noexcept -> index_t { return 1; }
-  auto tangent_dim() const noexcept -> index_t { return 1; }
+  auto configuration_dim() const -> index_t { return 1; }
+  auto tangent_dim() const -> index_t { return 1; }
 
-  auto configuration_dim_c() const noexcept -> fix_index<1> { return {}; }
-  auto tangent_dim_c() const noexcept -> fix_index<1> { return {}; }
+  auto configuration_dim_c() const -> fix_index<1> { return {}; }
+  auto tangent_dim_c() const -> fix_index<1> { return {}; }
 
-  auto acquire_workspace() const noexcept -> key { return {}; };
+  auto acquire_workspace() const -> key { return {}; };
 
-  void neutral_configuration(mut_view_t out_q) const noexcept { out_q[0] = 0; }
-  void random_configuration(mut_view_t out_q) const noexcept {
+  void neutral_configuration(mut_view_t out_q) const { out_q[0] = 0; }
+  void random_configuration(mut_view_t out_q) const {
     constexpr long double pi = 3.141592653589793238462643383279L;
     static thread_local auto mt = std::mt19937{std::random_device{}()};
 
@@ -56,7 +56,7 @@ public:
       mut_view_t out_q, //
       const_view_t q,   //
       const_view_t v    //
-  ) const noexcept {
+  ) const {
     out_q = q + v;
   }
 
@@ -64,7 +64,7 @@ public:
       mut_view_t out_q_dq, //
       const_view_t q,      //
       const_view_t v       //
-  ) const noexcept {
+  ) const {
     (void)q;
     (void)v;
     out_q_dq[0] = 1;
@@ -74,7 +74,7 @@ public:
       mut_view_t out_q_dv, //
       const_view_t q,      //
       const_view_t v       //
-  ) const noexcept {
+  ) const {
     (void)q;
     (void)v;
     out_q_dv[0] = 1;
@@ -84,7 +84,7 @@ public:
       mut_view_t out_v,     //
       const_view_t q_start, //
       const_view_t q_finish //
-  ) const noexcept {
+  ) const {
     out_v = q_finish - q_start;
   }
 
@@ -92,7 +92,7 @@ public:
       mut_view_t out_v_dq_start, //
       const_view_t q_start,      //
       const_view_t q_finish      //
-  ) const noexcept {
+  ) const {
     (void)q_start;
     (void)q_finish;
     out_v_dq_start[0] = -1;
@@ -102,7 +102,7 @@ public:
       mut_view_t out_v_dq_finish, //
       const_view_t q_start,       //
       const_view_t q_finish       //
-  ) const noexcept {
+  ) const {
     (void)q_start;
     (void)q_finish;
     out_v_dq_finish[0] = 1;
@@ -114,7 +114,7 @@ public:
       const_view_t v,              //
       const_view_t tau,            //
       key k                        //
-  ) const noexcept -> key {
+  ) const -> key {
     (void)v;
     using std::sin;
     out_acceleration[0] = -g / m_length * sin(q[0]) + tau[0] / m_mass;
@@ -129,7 +129,7 @@ public:
       const_view_t v,                   //
       const_view_t tau,                 //
       key k                             //
-  ) const noexcept -> key {
+  ) const -> key {
     (void)v;
     (void)tau;
     using std::cos;
@@ -139,7 +139,7 @@ public:
     return k;
   }
 
-  auto model_name() const noexcept -> fmt::string_view { return "pendulum"; }
+  auto model_name() const -> fmt::string_view { return "pendulum"; }
 };
 
 } // namespace ddp

@@ -48,8 +48,8 @@ public:
     x_proxy_t m_state_proxy;
     u_proxy_t m_control_proxy;
 
-    auto x() const noexcept -> typename x_proxy_t::value_type { return m_state_proxy.get(); }
-    auto u() const noexcept -> typename u_proxy_t::value_type { return m_control_proxy.get(); }
+    auto x() const -> typename x_proxy_t::value_type { return m_state_proxy.get(); }
+    auto u() const -> typename u_proxy_t::value_type { return m_control_proxy.get(); }
 
     auto x_next() -> typename x_proxy_t::value_type {
       auto next_idx_proxy = *(++m_state_proxy.m_inner_proxy.to_forward_iterator());
@@ -108,7 +108,7 @@ public:
   auto x_f() -> typename proxy_t<false>::x_proxy_t::value_type { return (*--end(m_state_data)).get(); }
   auto x_f() const -> typename proxy_t<true>::x_proxy_t::value_type { return (*--end(m_state_data)).get(); }
 
-  friend void swap(trajectory_t& t1, trajectory_t& t2) noexcept {
+  friend void swap(trajectory_t& t1, trajectory_t& t2) {
     trajectory_t tmp = static_cast<trajectory_t&&>(t1);
     t1 = static_cast<trajectory_t&&>(t2);
     t2 = static_cast<trajectory_t&&>(tmp);

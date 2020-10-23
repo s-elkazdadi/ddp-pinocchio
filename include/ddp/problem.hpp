@@ -72,8 +72,6 @@ void split_into_segments(
 template <typename Problem>
 void compute_derivatives(
     Problem const& prob, typename Problem::derivative_storage_t& derivs, typename Problem::trajectory_t const& traj) {
-  using scalar_t = typename Problem::scalar_t;
-
   derivs.lfx.setZero();
   derivs.lfxx.setZero();
 
@@ -86,8 +84,13 @@ void compute_derivatives(
   // clang-format on
 
   using iter = typename decltype(rng)::iterator;
-
-  constexpr index_t max_threads = 16;
+  constexpr index_t max_threads =
+#ifdef NDEBUG
+      16
+#else
+      1
+#endif
+      ;
 
   index_t const n_threads = std::min(max_threads, index_t{omp_get_num_procs()});
   iter _iter_arr[max_threads + 1];
@@ -104,7 +107,9 @@ void compute_derivatives(
       eigen::as_mut_view(derivs.lfx),
       traj.x_f());
 
-#pragma omp parallel num_threads(n_threads)
+#ifdef NDEBUG
+#pragma omp parallel default(none) shared(n_threads) shared(prob) shared(iter_arr) num_threads(n_threads)
+#endif
   {
     index_t thread_id = omp_get_thread_num();
     DDP_ASSERT(thread_id >= 0);
@@ -164,8 +169,8 @@ void compute_derivatives(
             DDP_MOVE(k));
       }
 
-#if not defined(NDEBUG)
       {
+        using scalar_t = typename Problem::scalar_t;
         auto msg = fmt::format("  checking all derivatives from thread {}", thread_id);
         ddp::chronometer_t timer(msg.c_str());
         DDP_ASSERT(not eq_v.get().hasNaN());
@@ -359,7 +364,6 @@ void compute_derivatives(
                (fabs(dddeq1[i]) <= eps or fabs(dddeq2[i]) <= 2 * pow(eps_factor, 3) * fabs(dddeq1[i]))));
         }
       }
-#endif
     }
   }
 }

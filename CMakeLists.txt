@@ -42,8 +42,6 @@ endif()
 set(CONAN_REQUIRES
     # Boost Software License 1.0
     boost/1.74.0
-    range-v3/0.11.0
-    #
     # Apache License 2.0
     benchmark/1.5.0
     #
@@ -58,10 +56,8 @@ set(CONAN_REQUIRES
     eigen/3.3.7
     #
     # New (Revised) BSD License
-    blaze/3.7
-    #
     # LGPL v3.0
-    mpfr/4.0.2
+    mpfr/4.1.0
 )
 target_compile_definitions(
   project_options INTERFACE SPDLOG_FMT_EXTERNAL gsl_CONFIG_DEFAULTS_VERSION=1

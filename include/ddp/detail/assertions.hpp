@@ -84,7 +84,7 @@ struct operand_strings_t {
 struct lhs_rhs_any_of_t {
   void const* lhs = {};
   void const* rhs = {};
-  auto (*comp)(void const* l, void const* r) noexcept -> bool = {};
+  auto (*comp)(void const* l, void const* r) -> bool = {};
   auto (*serializer)(void const* l, void const* r) -> operand_strings_t = {};
   fmt::string_view expr;
   fmt::string_view msg;
@@ -123,7 +123,7 @@ struct lhs_any_of_t {
     return {                                                                                                           \
         static_cast<void const*>(&lhs),                                                                                \
         static_cast<void const*>(&rhs),                                                                                \
-        +[](void const* l, void const* r) noexcept -> bool {                                                           \
+        +[](void const* l, void const* r) -> bool {                                                                    \
           return static_cast<bool>((*static_cast<T const*>(l))Op(*static_cast<U const*>(r)));                          \
         },                                                                                                             \
         +[](void const* l, void const* r) -> operand_strings_t {                                                       \
@@ -152,7 +152,7 @@ struct lhs_any_of_t {
     return {
         static_cast<void const*>(&lhs),
         nullptr,
-        +[](void const* l, void const* r) noexcept -> bool {
+        +[](void const* l, void const* r) -> bool {
           (void)r;
           return static_cast<bool>(*static_cast<T const*>(l));
         },
@@ -219,10 +219,9 @@ struct expression_decomposer_all_of_t {
 
 #define DDP_ASSERT_MSG_AGGREGATE_IMPL_FTOR(_, Decomposer, Elem)                                                        \
   (::ddp::assertion::Decomposer{                                                                                       \
-       BOOST_PP_STRINGIZE(BOOST_PP_REMOVE_PARENS(BOOST_PP_TUPLE_POP_FRONT(Elem))),                                     \
-       BOOST_PP_TUPLE_ELEM(0, Elem),                                                                                   \
-   }                                                                                                                   \
-   << BOOST_PP_REMOVE_PARENS(BOOST_PP_TUPLE_POP_FRONT(Elem))),
+      BOOST_PP_STRINGIZE(BOOST_PP_REMOVE_PARENS(BOOST_PP_TUPLE_POP_FRONT(Elem))), BOOST_PP_TUPLE_ELEM(0, Elem),                       \
+          }                                                                                                            \
+          << BOOST_PP_REMOVE_PARENS(BOOST_PP_TUPLE_POP_FRONT(Elem))),
 
 #define DDP_ASSERT_MSG_AGGREGATE_IMPL2(Decomposer, Aggregator, Callback, Seq)                                          \
   (::ddp::assertion::Aggregator({BOOST_PP_SEQ_FOR_EACH(DDP_ASSERT_MSG_AGGREGATE_IMPL_FTOR, Decomposer, Seq)})          \

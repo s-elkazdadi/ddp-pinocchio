@@ -31,7 +31,7 @@ struct affine_vector_function_seq_t {
 
 private:
   affine_vector_function_seq_t(
-      x_mat_seq_t x_data, val_mat_seq_t val_data, jac_mat_seq_t jac_data, problem_t const& prob) noexcept
+      x_mat_seq_t x_data, val_mat_seq_t val_data, jac_mat_seq_t jac_data, problem_t const& prob)
       : m_origin{DDP_MOVE(x_data)}, m_val_data{DDP_MOVE(val_data)}, m_jac_data{DDP_MOVE(jac_data)}, m_prob{&prob} {};
 
 public:
@@ -49,9 +49,7 @@ public:
         },
         m_prob{&prob} {}
 
-  auto clone() const noexcept(false) -> affine_vector_function_seq_t {
-    return {m_val_data.clone(), m_jac_data.clone(), m_prob};
-  }
+  auto clone() const -> affine_vector_function_seq_t { return {m_val_data.clone(), m_jac_data.clone(), m_prob}; }
 
   struct x_new_truncated_t {
     x_mat_seq_t const& m_parent;
@@ -59,7 +57,7 @@ public:
     friend auto end(x_new_truncated_t x) -> typename x_mat_seq_t::const_iterator { return --end(x.m_parent); }
   };
 
-  void update_origin(x_mat_seq_t const& new_trajectory) noexcept {
+  void update_origin(x_mat_seq_t const& new_trajectory) {
     auto tmp = eigen::make_matrix<scalar_t>(m_prob->dstate_dim());
 
     auto tmp_jac_ = eigen::make_matrix<scalar_t>(m_prob->dstate_dim(), m_prob->dstate_dim());
@@ -103,7 +101,7 @@ public:
     auto jac() const -> typename jac_mat_seq_t::template proxy_t<Is_Const>::value_type { return m_jac_proxy.get(); }
 
     template <typename In>
-    void operator()(eigen::view_t<val_t> out, eigen::view_t<In const> input) const noexcept {
+    void operator()(eigen::view_t<val_t> out, eigen::view_t<In const> input) const {
 
       // TODO: dynamic allocation?
       auto tmp1 = eigen::make_matrix<scalar_t>(m_prob->dstate_dim());
@@ -135,12 +133,12 @@ public:
             ? access_e::random
             : access_e::bidirectional;
 
-    auto operator++() noexcept -> iterator_impl_t& { return (++m_x_iter, ++m_val_iter, ++m_jac_iter, *this); }
-    auto operator--() noexcept -> iterator_impl_t& { return (--m_x_iter, --m_val_iter, --m_jac_iter, *this); }
-    auto operator+=(std::ptrdiff_t n) noexcept -> iterator_impl_t& {
+    auto operator++() -> iterator_impl_t& { return (++m_x_iter, ++m_val_iter, ++m_jac_iter, *this); }
+    auto operator--() -> iterator_impl_t& { return (--m_x_iter, --m_val_iter, --m_jac_iter, *this); }
+    auto operator+=(std::ptrdiff_t n) -> iterator_impl_t& {
       return (m_x_iter += n, m_val_iter += n, m_jac_iter += n, *this);
     }
-    friend auto operator==(iterator_impl_t a, iterator_impl_t b) noexcept -> bool {
+    friend auto operator==(iterator_impl_t a, iterator_impl_t b) -> bool {
       DDP_DEBUG_ASSERT_MSG_ALL_OF(
           ("", (a.m_val_iter == b.m_val_iter) == (a.m_jac_iter == b.m_jac_iter)),
           ("", (a.m_val_iter == b.m_val_iter) == (a.m_x_iter == b.m_x_iter)));
@@ -167,11 +165,11 @@ public:
     return {end(s.m_origin), end(s.m_val_data), end(s.m_jac_data), s.m_prob};
   }
 
-  auto operator[](index_t n) noexcept -> typename iterator::value_type {
+  auto operator[](index_t n) -> typename iterator::value_type {
     static_assert(iterator::iter_category == access_e::random, "");
     return begin(*this)[n];
   }
-  auto operator[](index_t n) const noexcept -> typename const_iterator::value_type {
+  auto operator[](index_t n) const -> typename const_iterator::value_type {
     static_assert(iterator::iter_category == access_e::random, "");
     return begin(*this)[n];
   }
@@ -189,17 +187,17 @@ struct constant_vector_function_seq_t {
   problem_t const* m_model;
 
 private:
-  constant_vector_function_seq_t(val_mat_seq_t val_data, problem_t const& model) noexcept
-      : m_val_data{DDP_MOVE(val_data)}, m_model{&model} {};
+  constant_vector_function_seq_t(val_mat_seq_t val_data, problem_t const& prob)
+      : m_val_data{DDP_MOVE(val_data)}, m_model{&prob} {};
 
 public:
-  constant_vector_function_seq_t(Out_Idx out_idx, problem_t const& model)
-      : m_val_data{DDP_MOVE(out_idx)}, m_model{&model} {}
+  constant_vector_function_seq_t(Out_Idx out_idx, problem_t const& prob)
+      : m_val_data{DDP_MOVE(out_idx)}, m_model{&prob} {}
 
-  auto clone() const noexcept(false) -> constant_vector_function_seq_t { return {m_val_data.clone()}; }
+  auto clone() const -> constant_vector_function_seq_t { return {m_val_data.clone()}; }
 
   template <typename T>
-  void update_origin(T const&) noexcept {}
+  void update_origin(T const& /* new_traj */) {}
 
   template <bool Is_Const>
   struct proxy_t {
@@ -212,10 +210,8 @@ public:
     auto jac() const -> zero::zero_t { return {}; }
 
     template <typename In>
-    void
-    operator()(eigen::view_t<val_t> out, eigen::view_t<In const> input, eigen::view_t<In const> origin) const noexcept {
+    void operator()(eigen::view_t<val_t> out, eigen::view_t<In const> input) const {
       (void)input;
-      (void)origin;
       out = val();
     }
   };
@@ -232,14 +228,12 @@ public:
     using pointer = void;
     using difference_type = std::ptrdiff_t;
     using iterator_category = std::input_iterator_tag;
-    static constexpr access_e iter_category = val_mat_seq_t::template iter_category<Is_Const>::iter_category;
+    static constexpr access_e iter_category = val_mat_seq_t::template iterator_impl_t<Is_Const>::iter_category;
 
-    auto operator++() noexcept -> iterator_impl_t& { return (++m_val_iter, *this); }
-    auto operator--() noexcept -> iterator_impl_t& { return (--m_val_iter, *this); }
-    auto operator+=(std::ptrdiff_t n) noexcept -> iterator_impl_t& { return (m_val_iter += n, *this); }
-    friend auto operator==(iterator_impl_t a, iterator_impl_t b) noexcept -> bool {
-      return a.m_val_iter == b.m_val_iter;
-    }
+    auto operator++() -> iterator_impl_t& { return (++m_val_iter, *this); }
+    auto operator--() -> iterator_impl_t& { return (--m_val_iter, *this); }
+    auto operator+=(std::ptrdiff_t n) -> iterator_impl_t& { return (m_val_iter += n, *this); }
+    friend auto operator==(iterator_impl_t a, iterator_impl_t b) -> bool { return a.m_val_iter == b.m_val_iter; }
     auto operator*() const -> proxy_t { return {*m_val_iter, m_model}; }
     DDP_REDUNDANT_BIDIRECTIONAL_ITER_METHODS(iterator_impl_t);
     DDP_REDUNDANT_RANDOM_ACCESS_ITER_METHODS(iterator_impl_t);
@@ -255,11 +249,11 @@ public:
   friend auto end(constant_vector_function_seq_t& s) -> iterator { return {end(s.m_val_data), s.m_model}; }
   friend auto end(constant_vector_function_seq_t const& s) -> const_iterator { return {end(s.m_val_data), s.m_model}; }
 
-  auto operator[](index_t n) noexcept -> typename iterator::value_type {
+  auto operator[](index_t n) -> typename iterator::value_type {
     static_assert(iterator::iter_category == access_e::random, "");
     return begin(*this)[n];
   }
-  auto operator[](index_t n) const noexcept -> typename const_iterator::value_type {
+  auto operator[](index_t n) const -> typename const_iterator::value_type {
     static_assert(iterator::iter_category == access_e::random, "");
     return begin(*this)[n];
   }

@@ -28,21 +28,21 @@ struct mat_seq_t {
 
   ~mat_seq_t() = default;
   mat_seq_t(mat_seq_t const&) = delete;
-  mat_seq_t(mat_seq_t&&) noexcept = default;
+  mat_seq_t(mat_seq_t&&) = default;
   auto operator=(mat_seq_t const&) -> mat_seq_t& = delete;
-  auto operator=(mat_seq_t&&) noexcept -> mat_seq_t& = default;
-  explicit mat_seq_t(indexer_t idx) noexcept : m_idx{DDP_MOVE(idx)}, m_data{m_idx.required_memory()} {
+  auto operator=(mat_seq_t&&) -> mat_seq_t& = default;
+  explicit mat_seq_t(indexer_t idx) : m_idx{DDP_MOVE(idx)}, m_data{m_idx.required_memory()} {
     static_assert(std::numeric_limits<scalar_t>::is_specialized, "");
     m_data.setConstant(std::numeric_limits<scalar_t>::quiet_NaN());
   }
 
 private:
-  mat_seq_t(indexer_t idx, storage_t&& data) noexcept : m_idx{DDP_MOVE(idx)}, m_data{DDP_MOVE(data)} {}
+  mat_seq_t(indexer_t idx, storage_t&& data) : m_idx{DDP_MOVE(idx)}, m_data{DDP_MOVE(data)} {}
 
 public:
-  auto data() const noexcept -> scalar_t const* { return m_data.data(); }
-  auto data() noexcept -> scalar_t* { return m_data.data(); }
-  auto clone() const noexcept(false) -> mat_seq_t { return {indexer_t{m_idx}, storage_t{m_data}}; }
+  auto data() const -> scalar_t const* { return m_data.data(); }
+  auto data() -> scalar_t* { return m_data.data(); }
+  auto clone() const -> mat_seq_t { return {indexer_t{m_idx}, storage_t{m_data}}; }
 
   template <bool Is_Const>
   struct proxy_t {
@@ -54,11 +54,11 @@ public:
     inner_proxy_t m_inner_proxy;
     data_ptr_t m_data;
 
-    auto rows() const noexcept -> row_kind { return m_inner_proxy.rows(); }
-    auto cols() const noexcept -> col_kind { return m_inner_proxy.cols(); }
-    auto offset() const noexcept -> index_t { return m_inner_proxy.m_memory_offset; }
+    auto rows() const -> row_kind { return m_inner_proxy.rows(); }
+    auto cols() const -> col_kind { return m_inner_proxy.cols(); }
+    auto offset() const -> index_t { return m_inner_proxy.m_memory_offset; }
 
-    auto get() const noexcept -> value_type {
+    auto get() const -> value_type {
       Eigen::Map<matrix_t const> m_{
           m_data + this->offset(),
           this->rows().value(),
@@ -72,11 +72,11 @@ public:
       };
     }
 
-    auto operator*() const noexcept -> value_type { return get(); }
+    auto operator*() const -> value_type { return get(); }
     explicit operator value_type() const { return get(); }
 
-    auto current_index() const noexcept -> index_t { return m_inner_proxy.current_index(); }
-    auto as_const() const noexcept -> proxy_t<true> { return {m_inner_proxy, m_data}; }
+    auto current_index() const -> index_t { return m_inner_proxy.current_index(); }
+    auto as_const() const -> proxy_t<true> { return {m_inner_proxy, m_data}; }
   };
 
   template <bool Is_Const>
@@ -95,13 +95,13 @@ public:
     indexer_iterator_t m_iter;
     data_ptr_t m_data;
 
-    auto operator++() noexcept -> iterator_impl_t& { return (++m_iter, *this); }
-    auto operator--() noexcept -> iterator_impl_t& { return (--m_iter, *this); }
-    auto operator+=(std::ptrdiff_t n) noexcept -> iterator_impl_t& {
+    auto operator++() -> iterator_impl_t& { return (++m_iter, *this); }
+    auto operator--() -> iterator_impl_t& { return (--m_iter, *this); }
+    auto operator+=(std::ptrdiff_t n) -> iterator_impl_t& {
       static_assert(iter_category == access_e::random, "");
       return (m_iter += n, *this);
     }
-    friend auto operator==(iterator_impl_t a, iterator_impl_t b) noexcept -> bool { return a.m_iter == b.m_iter; }
+    friend auto operator==(iterator_impl_t a, iterator_impl_t b) -> bool { return a.m_iter == b.m_iter; }
     auto operator*() const -> proxy_t { return {*m_iter, m_data}; }
     friend auto operator-(iterator_impl_t a, iterator_impl_t b) -> std::ptrdiff_t { return a.m_iter - b.m_iter; }
 
@@ -112,16 +112,16 @@ public:
   using iterator = iterator_impl_t<false>;
   using const_iterator = iterator_impl_t<true>;
 
-  friend auto begin(mat_seq_t& m) noexcept -> iterator { return {begin(m.m_idx), m.m_data.data()}; }
-  friend auto begin(mat_seq_t const& m) noexcept -> const_iterator { return {begin(m.m_idx), m.m_data.data()}; }
-  friend auto end(mat_seq_t& m) noexcept -> iterator { return {end(m.m_idx), m.m_data.data()}; }
-  friend auto end(mat_seq_t const& m) noexcept -> const_iterator { return {end(m.m_idx), m.m_data.data()}; }
+  friend auto begin(mat_seq_t& m) -> iterator { return {begin(m.m_idx), m.m_data.data()}; }
+  friend auto begin(mat_seq_t const& m) -> const_iterator { return {begin(m.m_idx), m.m_data.data()}; }
+  friend auto end(mat_seq_t& m) -> iterator { return {end(m.m_idx), m.m_data.data()}; }
+  friend auto end(mat_seq_t const& m) -> const_iterator { return {end(m.m_idx), m.m_data.data()}; }
 
-  auto operator[](index_t n) noexcept -> typename iterator::value_type {
+  auto operator[](index_t n) -> typename iterator::value_type {
     static_assert(iterator::iter_category == access_e::random, "");
     return begin(*this)[n];
   }
-  auto operator[](index_t n) const noexcept -> typename const_iterator::value_type {
+  auto operator[](index_t n) const -> typename const_iterator::value_type {
     static_assert(iterator::iter_category == access_e::random, "");
     return begin(*this)[n];
   }

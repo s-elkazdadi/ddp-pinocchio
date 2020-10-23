@@ -26,14 +26,14 @@ struct tensor_indexer_t {
   index_t m_required_memory;
 
 private:
-  tensor_indexer_t(Idx_O idx_o, Idx_L idx_l, Idx_R idx_r, index_t required_memory) noexcept
+  tensor_indexer_t(Idx_O idx_o, Idx_L idx_l, Idx_R idx_r, index_t required_memory)
       : m_idx_o{DDP_MOVE(idx_o)},
         m_idx_l{DDP_MOVE(idx_l)},
         m_idx_r{DDP_MOVE(idx_r)},
         m_required_memory{required_memory} {}
 
 public:
-  tensor_indexer_t(Idx_O idx_o, Idx_L idx_l, Idx_R idx_r) noexcept
+  tensor_indexer_t(Idx_O idx_o, Idx_L idx_l, Idx_R idx_r)
       : m_idx_o{DDP_MOVE(idx_o)}, m_idx_l{DDP_MOVE(idx_l)}, m_idx_r{DDP_MOVE(idx_r)}, m_required_memory{0} {
 
     DDP_ASSERT_MSG_ALL_OF(
@@ -52,21 +52,19 @@ public:
     }
   }
 
-  auto clone() const noexcept(noexcept(m_idx_l.clone()) and noexcept(m_idx_r.clone())) -> tensor_indexer_t {
+  auto clone() const -> tensor_indexer_t {
     return {m_idx_o.clone(), m_idx_l.clone(), m_idx_r.clone(), m_required_memory};
   }
 
-  auto index_begin() const noexcept -> index_t { return m_idx_o.index_begin(); }
-  auto index_end() const noexcept -> index_t { return m_idx_o.index_end(); }
+  auto index_begin() const -> index_t { return m_idx_o.index_begin(); }
+  auto index_end() const -> index_t { return m_idx_o.index_end(); }
 
-  auto required_memory() const noexcept -> index_t { return m_required_memory; };
-  auto stride(index_t t) const noexcept -> index_t {
-    return (this->outdim(t) * this->indiml(t) * this->indimr(t)).value();
-  }
+  auto required_memory() const -> index_t { return m_required_memory; };
+  auto stride(index_t t) const -> index_t { return (this->outdim(t) * this->indiml(t) * this->indimr(t)).value(); }
 
-  auto outdim(index_t t) const noexcept -> outdim_kind { return m_idx_o.rows(t); }
-  auto indiml(index_t t) const noexcept -> indiml_kind { return m_idx_l.rows(t); }
-  auto indimr(index_t t) const noexcept -> indimr_kind { return m_idx_r.rows(t); }
+  auto outdim(index_t t) const -> outdim_kind { return m_idx_o.rows(t); }
+  auto indiml(index_t t) const -> indiml_kind { return m_idx_l.rows(t); }
+  auto indimr(index_t t) const -> indimr_kind { return m_idx_r.rows(t); }
 
   using iterator = typename _::begin_end_impl<tensor_indexer_t>::iterator;
   using proxy_t = typename _::begin_end_impl<tensor_indexer_t>::proxy_t;
@@ -89,16 +87,16 @@ struct indexer_proxy_t<tensor_indexer_t<Idx_O, Idx_L, Idx_R> const*> {
   index_t m_current_index;
   index_t m_memory_offset;
 
-  auto outdim() const noexcept -> typename indexer_t::outdim_kind { return m_indexer->outdim(m_current_index); }
-  auto indiml() const noexcept -> typename indexer_t::indiml_kind { return m_indexer->indiml(m_current_index); }
-  auto indimr() const noexcept -> typename indexer_t::indimr_kind { return m_indexer->indimr(m_current_index); }
+  auto outdim() const -> typename indexer_t::outdim_kind { return m_indexer->outdim(m_current_index); }
+  auto indiml() const -> typename indexer_t::indiml_kind { return m_indexer->indiml(m_current_index); }
+  auto indimr() const -> typename indexer_t::indimr_kind { return m_indexer->indimr(m_current_index); }
 
-  auto current_index() const noexcept -> index_t { return m_current_index; }
-  auto to_forward_iterator() const noexcept -> indexer_iter_t<indexer_t const*>;
+  auto current_index() const -> index_t { return m_current_index; }
+  auto to_forward_iterator() const -> indexer_iter_t<indexer_t const*>;
 };
 
 template <typename Idx_O, typename Idx_L, typename Idx_R>
-auto indexer_proxy_t<tensor_indexer_t<Idx_O, Idx_L, Idx_R> const*>::to_forward_iterator() const noexcept
+auto indexer_proxy_t<tensor_indexer_t<Idx_O, Idx_L, Idx_R> const*>::to_forward_iterator() const
     -> indexer_iter_t<indexer_t const*> {
   return {m_indexer, m_current_index, m_memory_offset};
 }
@@ -134,11 +132,11 @@ struct tensor_view_t {
 
   using value_type = typename std::remove_const<T>::type;
 
-  auto data() const noexcept -> T* { return m_data; }
-  auto outdim() const noexcept -> Out_Dim { return m_outdim; }
-  auto indiml() const noexcept -> In_DimL { return m_indiml; }
-  auto indimr() const noexcept -> In_DimR { return m_indimr; }
-  auto operator()(index_t i, index_t j, index_t k) const noexcept -> T& {
+  auto data() const -> T* { return m_data; }
+  auto outdim() const -> Out_Dim { return m_outdim; }
+  auto indiml() const -> In_DimL { return m_indiml; }
+  auto indimr() const -> In_DimR { return m_indimr; }
+  auto operator()(index_t i, index_t j, index_t k) const -> T& {
     DDP_ASSERT_MSG_ALL_OF( //
         ("", i < m_outdim.value()),
         ("", j < m_indiml.value()),
@@ -178,7 +176,7 @@ struct tensor_view_t {
 
   void noalias_contract_add_outdim(
       matrix_mut_view_t<value_type, In_DimL, In_DimR> out,
-      matrix_const_view_t<value_type, Out_Dim, fix_index<1>> v) const noexcept {
+      matrix_const_view_t<value_type, Out_Dim, fix_index<1>> v) const {
 
     DDP_ASSERT_MSG_ALL_OF(
         ("", v.rows() == m_outdim.value()),
@@ -199,7 +197,7 @@ struct tensor_view_t {
 
   void noalias_contract_add_indimr(
       matrix_mut_view_t<value_type, Out_Dim, In_DimL> out,
-      matrix_const_view_t<value_type, In_DimR, fix_index<1>> v) const noexcept {
+      matrix_const_view_t<value_type, In_DimR, fix_index<1>> v) const {
 
     DDP_ASSERT_MSG_ALL_OF(
         ("", v.rows() == m_indimr.value()),
@@ -218,7 +216,7 @@ struct tensor_view_t {
 
   void noalias_contract_add_indiml(
       matrix_mut_view_t<value_type, Out_Dim, In_DimR> out,
-      matrix_const_view_t<value_type, In_DimL, fix_index<1>> v) const noexcept {
+      matrix_const_view_t<value_type, In_DimL, fix_index<1>> v) const {
 
     DDP_ASSERT_MSG_ALL_OF( //
         ("", v.rows() == m_indiml.value()),
@@ -234,7 +232,7 @@ struct tensor_view_t {
     }
   }
 
-  auto has_nan() const noexcept -> bool {
+  auto has_nan() const -> bool {
     using std::isnan;
     for (index_t i = 0; i < (m_outdim * m_indiml * m_indimr).value(); ++i) {
       if (isnan(m_data[i])) {
@@ -256,14 +254,14 @@ struct tensor_view_t {
     }
   }
 
-  auto as_const_view() const noexcept -> tensor_view_t<value_type const, Out_Dim, In_DimL, In_DimR> {
+  auto as_const_view() const -> tensor_view_t<value_type const, Out_Dim, In_DimL, In_DimR> {
     return {m_data, m_outdim, m_indiml, m_indimr};
   }
-  auto as_mut_view() noexcept -> tensor_view_t<value_type, Out_Dim, In_DimL, In_DimR> {
+  auto as_mut_view() -> tensor_view_t<value_type, Out_Dim, In_DimL, In_DimR> {
     static_assert(not std::is_const<T>::value, "");
     return {m_data, m_outdim, m_indiml, m_indimr};
   }
-  auto as_dynamic() noexcept -> tensor_view_t<T, dyn_index, dyn_index, dyn_index> {
+  auto as_dynamic() -> tensor_view_t<T, dyn_index, dyn_index, dyn_index> {
     return {
         m_data,
         dyn_index{m_outdim},
@@ -290,21 +288,19 @@ struct tensor_t {
 
   using value_type = typename std::remove_const<T>::type;
 
-  auto data() noexcept -> T* { return m_data; }
-  auto data() const noexcept -> T const* { return m_data; }
-  auto outdim() const noexcept -> Out_Dim { return m_outdim; }
-  auto indiml() const noexcept -> In_DimL { return m_indiml; }
-  auto indimr() const noexcept -> In_DimR { return m_indimr; }
+  auto data() -> T* { return m_data; }
+  auto data() const -> T const* { return m_data; }
+  auto outdim() const -> Out_Dim { return m_outdim; }
+  auto indiml() const -> In_DimL { return m_indiml; }
+  auto indimr() const -> In_DimR { return m_indimr; }
 
-  auto operator()(index_t i, index_t j, index_t k) noexcept -> T& { return this->as_mut_view()(i, j, k); }
-  auto operator()(index_t i, index_t j, index_t k) const noexcept -> T const& { return this->as_const_view()(i, j, k); }
+  auto operator()(index_t i, index_t j, index_t k) -> T& { return this->as_mut_view()(i, j, k); }
+  auto operator()(index_t i, index_t j, index_t k) const -> T const& { return this->as_const_view()(i, j, k); }
 
-  auto as_const_view() const noexcept -> tensor_view_t<T const, Out_Dim, In_DimL, In_DimR> {
+  auto as_const_view() const -> tensor_view_t<T const, Out_Dim, In_DimL, In_DimR> {
     return {m_data, m_outdim, m_indiml, m_indimr};
   }
-  auto as_mut_view() noexcept -> tensor_view_t<T, Out_Dim, In_DimL, In_DimR> {
-    return {m_data, m_outdim, m_indiml, m_indimr};
-  }
+  auto as_mut_view() -> tensor_view_t<T, Out_Dim, In_DimL, In_DimR> { return {m_data, m_outdim, m_indiml, m_indimr}; }
 };
 
 template <typename T, typename Out_Dim, typename In_DimL, typename In_DimR>
@@ -322,21 +318,19 @@ struct tensor_t<T, Out_Dim, In_DimL, In_DimR, false> {
 
   tensor_t(Out_Dim outdim, In_DimL indiml, In_DimR indimr) : m_outdim{outdim}, m_indiml{indiml}, m_indimr{indimr} {}
 
-  auto data() noexcept -> T* { return m_data.get(); }
-  auto data() const noexcept -> T const* { return m_data.get(); }
-  auto outdim() const noexcept -> Out_Dim { return m_outdim; }
-  auto indiml() const noexcept -> In_DimL { return m_indiml; }
-  auto indimr() const noexcept -> In_DimR { return m_indimr; }
+  auto data() -> T* { return m_data.get(); }
+  auto data() const -> T const* { return m_data.get(); }
+  auto outdim() const -> Out_Dim { return m_outdim; }
+  auto indiml() const -> In_DimL { return m_indiml; }
+  auto indimr() const -> In_DimR { return m_indimr; }
 
-  auto operator()(index_t i, index_t j, index_t k) noexcept -> T& { return this->as_mut_view()(i, j, k); }
-  auto operator()(index_t i, index_t j, index_t k) const noexcept -> T const& { return this->as_const_view()(i, j, k); }
+  auto operator()(index_t i, index_t j, index_t k) -> T& { return this->as_mut_view()(i, j, k); }
+  auto operator()(index_t i, index_t j, index_t k) const -> T const& { return this->as_const_view()(i, j, k); }
 
-  auto as_const_view() const noexcept -> tensor_view_t<T const, Out_Dim, In_DimL, In_DimR> {
+  auto as_const_view() const -> tensor_view_t<T const, Out_Dim, In_DimL, In_DimR> {
     return {data(), m_outdim, m_indiml, m_indimr};
   }
-  auto as_mut_view() noexcept -> tensor_view_t<T, Out_Dim, In_DimL, In_DimR> {
-    return {data(), m_outdim, m_indiml, m_indimr};
-  }
+  auto as_mut_view() -> tensor_view_t<T, Out_Dim, In_DimL, In_DimR> { return {data(), m_outdim, m_indiml, m_indimr}; }
 };
 } // namespace tensor
 
@@ -365,16 +359,16 @@ struct tensor_seq_t {
 
   ~tensor_seq_t() = default;
   tensor_seq_t(tensor_seq_t const&) = delete;
-  tensor_seq_t(tensor_seq_t&&) noexcept = default;
+  tensor_seq_t(tensor_seq_t&&) = default;
   auto operator=(tensor_seq_t const&) -> tensor_seq_t& = delete;
-  auto operator=(tensor_seq_t&&) noexcept -> tensor_seq_t& = default;
-  explicit tensor_seq_t(indexer_t idx) noexcept : m_idx{DDP_MOVE(idx)}, m_data{m_idx.required_memory()} {}
+  auto operator=(tensor_seq_t&&) -> tensor_seq_t& = default;
+  explicit tensor_seq_t(indexer_t idx) : m_idx{DDP_MOVE(idx)}, m_data{m_idx.required_memory()} {}
 
 private:
-  tensor_seq_t(indexer_t idx, storage_t&& data) noexcept : m_idx{DDP_MOVE(idx)}, m_data{DDP_MOVE(data)} {}
+  tensor_seq_t(indexer_t idx, storage_t&& data) : m_idx{DDP_MOVE(idx)}, m_data{DDP_MOVE(data)} {}
 
 public:
-  auto clone() noexcept(false) -> tensor_seq_t { return {m_idx, storage_t{m_data}}; }
+  auto clone() -> tensor_seq_t { return {m_idx, storage_t{m_data}}; }
 
   template <bool Is_Const>
   struct proxy_t {
@@ -386,12 +380,12 @@ public:
     inner_proxy_t m_inner_proxy;
     data_ptr_t m_data;
 
-    auto outdim() const noexcept -> outdim_kind { return m_inner_proxy.outdim(); }
-    auto indiml() const noexcept -> indiml_kind { return m_inner_proxy.indiml(); }
-    auto indimr() const noexcept -> indimr_kind { return m_inner_proxy.indimr(); }
-    auto offset() const noexcept -> index_t { return m_inner_proxy.m_memory_offset; }
+    auto outdim() const -> outdim_kind { return m_inner_proxy.outdim(); }
+    auto indiml() const -> indiml_kind { return m_inner_proxy.indiml(); }
+    auto indimr() const -> indimr_kind { return m_inner_proxy.indimr(); }
+    auto offset() const -> index_t { return m_inner_proxy.m_memory_offset; }
 
-    auto get() const noexcept -> value_type {
+    auto get() const -> value_type {
       return {
           m_data + this->offset(),
           this->outdim(),
@@ -400,11 +394,11 @@ public:
       };
     }
 
-    auto operator*() const noexcept -> value_type { return get(); }
+    auto operator*() const -> value_type { return get(); }
     explicit operator value_type() const { return get(); }
 
-    auto current_index() const noexcept -> index_t { return m_inner_proxy.current_index(); }
-    auto as_const() const noexcept -> proxy_t<true> { return {m_inner_proxy, m_data}; }
+    auto current_index() const -> index_t { return m_inner_proxy.current_index(); }
+    auto as_const() const -> proxy_t<true> { return {m_inner_proxy, m_data}; }
   };
 
   template <bool Is_Const>
@@ -423,10 +417,10 @@ public:
     indexer_iterator_t m_iter;
     data_ptr_t m_data;
 
-    auto operator++() noexcept -> iterator_impl_t& { return (++m_iter, *this); }
-    auto operator--() noexcept -> iterator_impl_t& { return (--m_iter, *this); }
-    auto operator+=(std::ptrdiff_t n) noexcept -> iterator_impl_t& { return (m_iter += n, *this); }
-    friend auto operator==(iterator_impl_t a, iterator_impl_t b) noexcept -> bool { return a.m_iter == b.m_iter; }
+    auto operator++() -> iterator_impl_t& { return (++m_iter, *this); }
+    auto operator--() -> iterator_impl_t& { return (--m_iter, *this); }
+    auto operator+=(std::ptrdiff_t n) -> iterator_impl_t& { return (m_iter += n, *this); }
+    friend auto operator==(iterator_impl_t a, iterator_impl_t b) -> bool { return a.m_iter == b.m_iter; }
     auto operator*() const -> proxy_t { return {*m_iter, m_data}; }
 
     DDP_REDUNDANT_BIDIRECTIONAL_ITER_METHODS(iterator_impl_t);
@@ -436,16 +430,16 @@ public:
   using iterator = iterator_impl_t<false>;
   using const_iterator = iterator_impl_t<true>;
 
-  friend auto begin(tensor_seq_t& s) noexcept -> iterator { return {begin(s.m_idx), s.m_data.data()}; }
-  friend auto begin(tensor_seq_t const& s) noexcept -> const_iterator { return {begin(s.m_idx), s.m_data.data()}; }
-  friend auto end(tensor_seq_t& s) noexcept -> iterator { return {end(s.m_idx), s.m_data.data()}; }
-  friend auto end(tensor_seq_t const& s) noexcept -> const_iterator { return {end(s.m_idx), s.m_data.data()}; }
+  friend auto begin(tensor_seq_t& s) -> iterator { return {begin(s.m_idx), s.m_data.data()}; }
+  friend auto begin(tensor_seq_t const& s) -> const_iterator { return {begin(s.m_idx), s.m_data.data()}; }
+  friend auto end(tensor_seq_t& s) -> iterator { return {end(s.m_idx), s.m_data.data()}; }
+  friend auto end(tensor_seq_t const& s) -> const_iterator { return {end(s.m_idx), s.m_data.data()}; }
 
-  auto operator[](index_t n) noexcept -> typename iterator::value_type {
+  auto operator[](index_t n) -> typename iterator::value_type {
     static_assert(iterator::iter_category == access_e::random, "");
     return begin(*this)[n];
   }
-  auto operator[](index_t n) const noexcept -> typename const_iterator::value_type {
+  auto operator[](index_t n) const -> typename const_iterator::value_type {
     static_assert(iterator::iter_category == access_e::random, "");
     return begin(*this)[n];
   }

@@ -28,17 +28,17 @@ struct dynamics_t {
   using key = typename model_t::key;
 
   auto state_dim() const -> x_t { return m_model.configuration_dim_c() + m_model.tangent_dim_c(); }
-  auto dstate_dim() const noexcept -> dx_t { return m_model.tangent_dim_c() + m_model.tangent_dim_c(); }
+  auto dstate_dim() const -> dx_t { return m_model.tangent_dim_c() + m_model.tangent_dim_c(); }
   auto state_indexer(index_t begin, index_t end) const -> state_indexer_t {
     return indexing::vec_regular_indexer(begin, end, m_model.configuration_dim_c() + m_model.tangent_dim_c());
   }
   auto dstate_indexer(index_t begin, index_t end) const -> dstate_indexer_t {
     return indexing::vec_regular_indexer(begin, end, m_model.tangent_dim_c() + m_model.tangent_dim_c());
   }
-  auto control_dim(index_t /*unused*/) const noexcept -> u_t { return m_model.tangent_dim_c(); }
-  auto dcontrol_dim(index_t /*unused*/) const noexcept -> du_t { return m_model.tangent_dim_c(); }
+  auto control_dim(index_t /*unused*/) const -> u_t { return m_model.tangent_dim_c(); }
+  auto dcontrol_dim(index_t /*unused*/) const -> du_t { return m_model.tangent_dim_c(); }
 
-  auto acquire_workspace() const noexcept -> key { return m_model.acquire_workspace(); }
+  auto acquire_workspace() const -> key { return m_model.acquire_workspace(); }
 
   void neutral_configuration(x_mut<dims> out) const {
     DDP_ASSERT_MSG("out vector does not have the correct size", out.size() == state_dim().value());
@@ -204,9 +204,9 @@ struct dynamics_t {
         .second_order_deriv(fxx, fux, fuu, fx, fu, f, t, x, u, DDP_MOVE(k));
   }
 
-  auto second_order_finite_diff() const noexcept { return m_second_order_finite_diff; }
+  auto second_order_finite_diff() const { return m_second_order_finite_diff; }
 
-  auto name() const noexcept -> fmt::string_view { return m_model.model_name(); }
+  auto name() const -> fmt::string_view { return m_model.model_name(); }
 
   model_t const& m_model;
   scalar_t dt;

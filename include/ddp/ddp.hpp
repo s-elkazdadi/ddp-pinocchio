@@ -288,8 +288,8 @@ struct no_multiplier_feedback_t {
   index_t m_end;
 
   struct proxy_t {
-    static auto val() noexcept -> zero::zero_t { return {}; }
-    static auto jac() noexcept -> zero::zero_t { return {}; }
+    static auto val() -> zero::zero_t { return {}; }
+    static auto jac() -> zero::zero_t { return {}; }
   };
 
   struct iterator {
@@ -303,22 +303,22 @@ struct no_multiplier_feedback_t {
     using reference = proxy_t;
     static constexpr access_e iter_category = access_e::random;
 
-    auto operator++() noexcept -> iterator& {
+    auto operator++() -> iterator& {
       DDP_ASSERT(m_index + 1 < m_end);
       ++m_index;
       return *this;
     }
-    auto operator--() noexcept -> iterator& {
+    auto operator--() -> iterator& {
       DDP_ASSERT(m_index - 1 >= m_begin);
       return *this;
     }
-    auto operator+=(difference_type n) noexcept -> iterator& {
+    auto operator+=(difference_type n) -> iterator& {
       DDP_ASSERT_MSG_ALL_OF( //
           ("", m_index + n < m_end),
           ("", m_index + n >= m_begin));
       return *this;
     };
-    friend auto operator==(iterator a, iterator b) noexcept -> bool {
+    friend auto operator==(iterator a, iterator b) -> bool {
       DDP_ASSERT_MSG_ALL_OF( //
           ("", a.m_end == b.m_end),
           ("", a.m_begin == b.m_begin));
@@ -330,8 +330,8 @@ struct no_multiplier_feedback_t {
   using reverse_iterator = std::reverse_iterator<iterator>;
   using const_reverse_iterator = std::reverse_iterator<iterator>;
 
-  friend auto begin(no_multiplier_feedback_t const& s) noexcept -> iterator { return {s.m_begin, s.m_begin, s.m_end}; }
-  friend auto end(no_multiplier_feedback_t const& s) noexcept -> iterator { return {s.m_begin, s.m_begin, s.m_end}; }
+  friend auto begin(no_multiplier_feedback_t const& s) -> iterator { return {s.m_begin, s.m_begin, s.m_end}; }
+  friend auto end(no_multiplier_feedback_t const& s) -> iterator { return {s.m_begin, s.m_begin, s.m_end}; }
 };
 } // namespace detail
 
@@ -360,9 +360,10 @@ struct ddp_solver_t {
     struct type {
       eq_type eq;
     };
-    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob) -> type {
+    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob, trajectory_t const& traj) -> type {
       (void)prob;
-      auto multipliers = type{eq_type{eq_idx.clone()}};
+      (void)traj;
+      auto multipliers = type{eq_type{eq_idx.clone(), prob}};
       for (auto e : multipliers.eq) {
         e.val().setZero();
       }
@@ -375,13 +376,15 @@ struct ddp_solver_t {
     struct type {
       eq_type eq;
     };
-    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob) -> type {
+    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob, trajectory_t const& traj) -> type {
       auto multipliers = type{eq_type{eq_idx.clone(), prob}};
-      for (auto e : multipliers.eq) {
+      for (auto zipped : ranges::zip(traj, multipliers.eq)) {
+        DDP_BIND(auto&&, (xu, e), zipped);
 
         prob.neutral_configuration(eigen::as_mut_view(e.origin()));
         e.val().setZero();
         e.jac().setZero();
+        e.origin() = xu.x();
       }
       return multipliers;
     }
@@ -394,8 +397,8 @@ struct ddp_solver_t {
                                      ? fn_kind::constant                         //
                                      : fn_kind::affine;                          //
     using type = typename multiplier_sequence_impl<K>::type;
-    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob) -> type {
-      return multiplier_sequence_impl<K>::zero(eq_idx, prob);
+    static auto zero(eq_indexer_t const& eq_idx, problem_t const& prob, trajectory_t const& traj) -> type {
+      return multiplier_sequence_impl<K>::zero(eq_idx, prob, traj);
     }
   };
 
@@ -411,8 +414,8 @@ struct ddp_solver_t {
   using control_feedback_t = detail::matrix_seq::affine_vector_function_seq_t<problem_t, control_indexer_t>;
 
   template <method M>
-  auto zero_multipliers() const -> typename multiplier_sequence<M>::type {
-    return multiplier_sequence<M>::zero(eq_idx, prob);
+  auto zero_multipliers(trajectory_t const& traj) const -> typename multiplier_sequence<M>::type {
+    return multiplier_sequence<M>::zero(eq_idx, prob, traj);
   }
 
   template <method M>
@@ -517,20 +520,19 @@ struct ddp_solver_t {
           zipped);
       // clang-format on
 
-      scalar_t nan = std::numeric_limits<scalar_t>::quiet_NaN();
       scalar_t zero = 0;
-      (*lx).setConstant(zero);
-      (*lu).setConstant(zero);
-      (*lxx).setConstant(zero);
-      (*lux).setConstant(zero);
-      (*luu).setConstant(zero);
+      (*lx).setZero();
+      (*lu).setZero();
+      (*lxx).setZero();
+      (*lux).setZero();
+      (*luu).setZero();
 
-      (*fx).setConstant(zero);
-      (*fu).setConstant(zero);
+      (*fx).setZero();
+      (*fu).setZero();
 
-      (*eq_val).setConstant(zero);
-      (*eq_x).setConstant(zero);
-      (*eq_u).setConstant(zero);
+      (*eq_val).setZero();
+      (*eq_x).setZero();
+      (*eq_u).setZero();
 
       (*fxx).set_constant(zero);
       (*fux).set_constant(zero);
@@ -799,13 +801,7 @@ struct ddp_solver_t {
 
     regularization_t<scalar_t> reg{0, 1, 2, 1e-5};
 
-    auto mults = zero_multipliers<M>();
-    for (auto zipped : ranges::zip(mults.eq, traj)) {
-      DDP_BIND(auto&&, (eq, xu), zipped);
-      eq.val().setZero();
-      eq.jac().setZero();
-      eq.origin() = xu.x();
-    }
+    auto mults = zero_multipliers<M>(traj);
 
     auto ctrl_fb = control_feedback_t{u_idx, prob};
 
@@ -839,6 +835,7 @@ struct ddp_solver_t {
       (void)opt_obj;
 
       {
+        scalar_t const beta = 0.5;
         chronometer_t c{"updating multipliers"};
         switch (mult_update_rv) {
         case mult_update_attempt_result_e::no_update: {
@@ -846,18 +843,18 @@ struct ddp_solver_t {
         }
         case mult_update_attempt_result_e::update_failure: {
           using std::pow;
-          fmt::print("desired new mu {}\n", pow(mu / (previous_opt_constr / opt_constr), 1 / scalar_t{1 - 0.5}));
+          fmt::print("desired new mu {}\n", pow(mu / (previous_opt_constr / opt_constr), 1 / (1 - beta)));
           mu = 10 * std::max(     //
                         std::min( //
-                            pow(mu / (previous_opt_constr / opt_constr), scalar_t{1.0 / (1.0 - scalar_t{0.5})}),
+                            pow(mu / (previous_opt_constr / opt_constr), 1.0 / (1 - beta)),
                             mu * scalar_t{1e5}),
                         mu);
           break;
         }
         case mult_update_attempt_result_e::update_success: {
           using std::pow;
-          n = opt_constr / pow(mu, static_cast<scalar_t>(0.5L));
-          w /= pow(mu, static_cast<scalar_t>(1));
+          n = opt_constr / pow(mu, beta / 2);
+          w /= pow(mu, scalar_t{1});
           previous_opt_constr = opt_constr;
           break;
         }

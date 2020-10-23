@@ -9,12 +9,10 @@
 #include "ddp/pendulum_model.hpp"
 
 #include <fmt/ostream.h>
-#include <boost/multiprecision/mpfr.hpp>
+#include "mpfr/mpfr.hpp"
 
 #if 1
-using scalar_t = boost::multiprecision::number<
-    boost::multiprecision::backends::mpfr_float_backend<1000, boost::multiprecision::allocate_stack>,
-    boost::multiprecision::et_off>;
+using scalar_t = mpfr::mp_float_t<mpfr::digits10{1000}>;
 #else
 using scalar_t = double;
 #endif
@@ -94,14 +92,11 @@ auto main() -> int {
   {
     using std::pow;
 
-    constexpr auto M = method::primal_dual_affine_multipliers;
+    constexpr auto M = method::primal_dual_constant_multipliers;
 
     auto derivs = solver.uninit_derivative_storage();
 
     scalar_t const mu_init = 1e20;
-    scalar_t w = 1 / mu_init;
-    scalar_t n = 1 / pow(mu_init, static_cast<scalar_t>(0.1L));
-    scalar_t reg = 0;
     auto res = solver.solve<M>({200, 1e-200, mu_init}, solver.make_trajectory(control_generator_t{u_idx}));
     DDP_BIND(auto&&, (traj, fb), res);
     (void)fb;

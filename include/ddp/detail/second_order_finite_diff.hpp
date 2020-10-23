@@ -5,46 +5,6 @@
 
 namespace ddp {
 
-namespace eigen {
-
-template <typename T>
-struct into_view_t {
-  T* data;
-  index_t rows;
-  index_t cols;
-  index_t outer_stride;
-
-  template <typename View>
-  operator/* NOLINT(hicpp-explicit-conversions) */ View() const {
-    if (View::RowsAtCompileTime != Eigen::Dynamic) {
-      DDP_ASSERT(rows == View::RowsAtCompileTime);
-    }
-    if (View::ColsAtCompileTime != Eigen::Dynamic) {
-      DDP_ASSERT(cols == View::ColsAtCompileTime);
-    }
-    if (View::MaxRowsAtCompileTime != Eigen::Dynamic) {
-      DDP_ASSERT(rows <= View::MaxRowsAtCompileTime);
-    }
-    if (View::MaxColsAtCompileTime != Eigen::Dynamic) {
-      DDP_ASSERT(cols <= View::MaxColsAtCompileTime);
-    }
-    return {data, rows, cols, outer_stride};
-  }
-};
-
-template <typename T>
-auto into_view(view_t<T> mat)
-    -> into_view_t<DDP_CONDITIONAL(std::is_const<T>::value, typename T::Scalar const, typename T::Scalar)> {
-  return {
-      mat.data(),
-      mat.rows(),
-      mat.cols(),
-      mat.outerStride(),
-  };
-}
-
-} // namespace eigen
-
 template <
     typename Scalar,
     typename X,

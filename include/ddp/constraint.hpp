@@ -260,7 +260,7 @@ auto constraint_advance_time(Constraint c) ->
   return detail::constraint_advance_time_impl<N>::template run<Constraint>(DDP_MOVE(c));
 }
 
-template <typename Model, typename Constraint_Target_View>
+template <typename Model, typename Constraint_Target_View, index_t N_Frames>
 struct spatial_constraint_t {
   using scalar_t = typename Model::scalar_t;
   using model_t = Model;
@@ -295,21 +295,33 @@ struct spatial_constraint_t {
   }
 
   auto eval_to(out_mut<dims> out, index_t t, x_const<dims> x, u_const<dims> u, key k) const -> key {
-    auto target = eigen::as_const_view(m_constraint_target_view[t]);
-    if (target.rows() == 0) {
-      return k;
-    }
-
-    (void)u;
     auto nq = m_dynamics.m_model.configuration_dim_c();
-
     DDP_BIND(auto, (q, v), eigen::split_at_row(x, nq));
-    DDP_BIND(auto, (out_3, out_0), eigen::split_at_row_mut(out, fix_index<3>{}));
-    DDP_ASSERT(out_0.rows() == 0);
+    (void)u;
     (void)v;
+    bool computed = false;
 
-    k = m_dynamics.m_model.frame_coordinates(out_3, m_frame_id, q, DDP_MOVE(k));
-    out -= target;
+    for (index_t i = 0; i < N_Frames; ++i) {
+
+      auto const& _target = m_constraint_target_view(i, t);
+      auto target = eigen::as_const_view(_target);
+      if (target.rows() == 0) {
+        continue;
+      }
+
+      DDP_BIND(auto, (out_head, out_tail), eigen::split_at_row_mut(out, dyn_index{3 * i}));
+      DDP_BIND(auto, (out_3, out_rest), eigen::split_at_row_mut(out_tail, fix_index<3>{}));
+      (void)out_head;
+      (void)out_rest;
+
+      if (not computed) {
+        k = m_dynamics.m_model.frame_coordinates_precompute(q, DDP_MOVE(k));
+        computed = true;
+      }
+
+      k = m_dynamics.m_model.frame_coordinates(out_3, m_frame_id[i], DDP_MOVE(k));
+      out_3 -= target;
+    }
     return k;
   }
 
@@ -322,35 +334,45 @@ struct spatial_constraint_t {
       u_const<dims> u,       //
       key k                  //
   ) const -> key {
-    (void)u;
-    auto target = eigen::as_const_view(m_constraint_target_view[t]);
-    DDP_ASSERT_MSG(fmt::format("at t = {}", t), target.rows() == out.rows());
-    if (target.rows() == 0) {
-      return k;
-    }
-
-    auto const& m_model = m_dynamics.m_model;
-
-    auto nq = m_model.configuration_dim_c();
-    auto nv = m_model.tangent_dim_c();
-
+    auto nq = m_dynamics.m_model.configuration_dim_c();
+    auto nv = m_dynamics.m_model.tangent_dim_c();
     DDP_BIND(auto, (q, v), eigen::split_at_row(x, nq));
-    DDP_BIND(auto, (out_3x, out_0x), eigen::split_at_row_mut(out_x, fix_index<3>{}));
-    DDP_BIND(auto, (out_3, out_0), eigen::split_at_row_mut(out, fix_index<3>{}));
-
-    DDP_ASSERT(out_0x.rows() == 0);
-    DDP_ASSERT(out_0.rows() == 0);
-
-    DDP_BIND(auto, (out_3q, out_3v), eigen::split_at_col_mut(out_3x, nv));
-
+    (void)u;
     (void)v;
-
-    k = m_dynamics.m_model.frame_coordinates(out_3, m_frame_id, q, DDP_MOVE(k));
-    out -= target;
-
-    k = m_dynamics.m_model.d_frame_coordinates(out_3q, m_frame_id, q, DDP_MOVE(k));
-    out_3v.setZero();
     out_u.setZero();
+
+    bool computed = false;
+    for (index_t i = 0; i < N_Frames; ++i) {
+      auto target = eigen::as_const_view(m_constraint_target_view(i, t));
+      if (target.rows() == 0) {
+        continue;
+      }
+
+      DDP_BIND(auto, (out_head, out_tail), eigen::split_at_row_mut(out, dyn_index{3 * i}));
+      DDP_BIND(auto, (out_head_x, out_tail_x), eigen::split_at_row_mut(out_x, dyn_index{3 * i}));
+
+      DDP_BIND(auto, (out_3x, out_rest_x), eigen::split_at_row_mut(out_tail_x, fix_index<3>{}));
+      DDP_BIND(auto, (out_3, out_rest), eigen::split_at_row_mut(out_tail, fix_index<3>{}));
+      (void)out_head;
+      (void)out_rest;
+      (void)out_head_x;
+      (void)out_rest_x;
+
+      DDP_BIND(auto, (out_3q, out_3v), eigen::split_at_col_mut(out_3x, nv));
+
+      (void)v;
+
+      if (not computed) {
+        k = m_dynamics.m_model.dframe_coordinates_precompute(q, DDP_MOVE(k));
+        computed = true;
+      }
+
+      k = m_dynamics.m_model.frame_coordinates(out_3, m_frame_id[i], DDP_MOVE(k));
+      out_3 -= target;
+
+      k = m_dynamics.m_model.d_frame_coordinates(out_3q, m_frame_id[i], DDP_MOVE(k));
+      out_3v.setZero();
+    }
     return k;
   }
 
@@ -374,13 +396,18 @@ struct spatial_constraint_t {
 
   dynamics_t m_dynamics;
   Constraint_Target_View m_constraint_target_view;
-  index_t m_frame_id;
+  index_t m_frame_id[N_Frames];
 };
 
-template <typename Dynamics, typename Constraint_Target_View>
-auto spatial_constraint(Dynamics d, Constraint_Target_View v, index_t frame_id)
-    -> spatial_constraint_t<typename Dynamics::model_t, Constraint_Target_View> {
-  return {d, v, frame_id};
+template <typename Dynamics, typename Constraint_Target_View, index_t N_Frames>
+auto spatial_constraint(Dynamics d, Constraint_Target_View v, index_t const (&ids)[N_Frames])
+    -> spatial_constraint_t<typename Dynamics::model_t, Constraint_Target_View, N_Frames> {
+  auto out =
+      spatial_constraint_t<typename Dynamics::model_t, Constraint_Target_View, N_Frames>{DDP_MOVE(d), DDP_MOVE(v), {}};
+  for (index_t i = 0; i < N_Frames; ++i) {
+    out.m_frame_id[i] = ids[i];
+  }
+  return out;
 }
 
 template <typename Model, typename Constraint_Target_View>

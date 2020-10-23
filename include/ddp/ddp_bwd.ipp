@@ -55,11 +55,7 @@ void ddp_solver_t<Problem>::
 
       {
         using std::isfinite;
-        DDP_ASSERT_MSG_ALL_OF(
-            ("", isfinite(mu)),
-            ("", not pe.hasNaN()),
-            ("", not pe_x.hasNaN()),
-            ("", eq_mult.origin() == xu.x()));
+        DDP_ASSERT_MSG_ALL_OF(("", isfinite(mu)), ("", not pe.hasNaN()), ("", not pe_x.hasNaN()));
       }
 
       // clang-format off

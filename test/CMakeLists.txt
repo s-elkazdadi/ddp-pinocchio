@@ -28,19 +28,19 @@ target_compile_definitions(
 target_compile_definitions(pinocchio-aba-double PUBLIC DDP_PINOCCHIO_ABA)
 target_compile_definitions(pinocchio-frames-double PUBLIC DDP_PINOCCHIO_FRAMES)
 
-add_library(pinocchio-general-mpfr-500 pinocchio_mpfr_500.cpp)
-add_library(pinocchio-aba-mpfr-500 pinocchio_mpfr_500.cpp)
-add_library(pinocchio-frames-mpfr-500 pinocchio_mpfr_500.cpp)
-target_link_libraries(pinocchio-general-mpfr-500 PUBLIC ddp)
-target_link_libraries(pinocchio-aba-mpfr-500 PUBLIC ddp)
-target_link_libraries(pinocchio-frames-mpfr-500 PUBLIC ddp)
+add_library(pinocchio-general-mpfr-1000 pinocchio_mpfr_1000.cpp)
+add_library(pinocchio-aba-mpfr-1000 pinocchio_mpfr_1000.cpp)
+add_library(pinocchio-frames-mpfr-1000 pinocchio_mpfr_1000.cpp)
+target_link_libraries(pinocchio-general-mpfr-1000 PUBLIC ddp)
+target_link_libraries(pinocchio-aba-mpfr-1000 PUBLIC ddp)
+target_link_libraries(pinocchio-frames-mpfr-1000 PUBLIC ddp)
 
 target_compile_definitions(
-  pinocchio-general-mpfr-500 PUBLIC DDP_PINOCCHIO_GENERAL
+  pinocchio-general-mpfr-1000 PUBLIC DDP_PINOCCHIO_GENERAL
 )
-target_compile_definitions(pinocchio-aba-mpfr-500 PUBLIC DDP_PINOCCHIO_ABA)
+target_compile_definitions(pinocchio-aba-mpfr-1000 PUBLIC DDP_PINOCCHIO_ABA)
 target_compile_definitions(
-  pinocchio-frames-mpfr-500 PUBLIC DDP_PINOCCHIO_FRAMES
+  pinocchio-frames-mpfr-1000 PUBLIC DDP_PINOCCHIO_FRAMES
 )
 
 add_library(pinocchio-impl INTERFACE)
@@ -49,9 +49,9 @@ target_link_libraries(
   INTERFACE pinocchio-general-double
             pinocchio-aba-double
             pinocchio-frames-double
-            pinocchio-general-mpfr-500
-            pinocchio-aba-mpfr-500
-            pinocchio-frames-mpfr-500
+            pinocchio-general-mpfr-1000
+            pinocchio-aba-mpfr-1000
+            pinocchio-frames-mpfr-1000
 )
 
 add_executable(test-pinocchio pinocchio.cpp)

@@ -9,12 +9,10 @@
 #include "ddp/pendulum_model.hpp"
 
 #include <fmt/ostream.h>
-#include <boost/multiprecision/mpfr.hpp>
+#include "mpfr/mpfr.hpp"
 
 #if 1
-using scalar_t = boost::multiprecision::number<
-    boost::multiprecision::backends::mpfr_float_backend<1000, boost::multiprecision::allocate_stack>,
-    boost::multiprecision::et_off>;
+using scalar_t = mpfr::mp_float_t<mpfr::digits10{1000}>;
 #else
 using scalar_t = double;
 #endif
@@ -54,19 +52,19 @@ auto main() -> int {
 
   struct position_target_range_t {
     using vec3 = decltype(eigen::make_matrix<scalar_t>(fix_index<3>{}));
-    vec3 m_target;
+    vec3 m_target[4];
 
-    auto eq_idx() const -> indexing::range_row_filter_t<indexing::regular_indexer_t<fix_index<3>>> {
+    auto eq_idx() const -> indexing::range_row_filter_t<indexing::regular_indexer_t<fix_index<12>>> {
       (void)this;
-      auto unfiltered = indexing::vec_regular_indexer(2, horizon + 2, fix_index<3>{});
+      auto unfiltered = indexing::vec_regular_indexer(2, horizon + 2, fix_index<12>{});
       return {unfiltered, 2, horizon};
     }
-    auto operator[](index_t t) const
+    auto operator()(index_t i, index_t t) const
         -> eigen::matrix_view_t<scalar_t const, dyn_index, fix_index<1>, fix_index<3>, fix_index<1>> {
       if (eq_idx().rows(t).value() == 0) {
         return {nullptr, 0, 1, 0};
       }
-      return eigen::into_view(eigen::as_const_view(m_target));
+      return eigen::into_view(eigen::as_const_view(m_target[i]));
     }
   };
 
@@ -112,27 +110,23 @@ auto main() -> int {
   auto q0 = eigen::make_matrix<scalar_t>(nq);
   model.neutral_configuration(eigen::as_mut_view(q0));
 
-  auto constr_feet = [&](index_t idx) {
-    Eigen::Matrix<scalar_t, 3, 1> q;
+  Eigen::Matrix<scalar_t, 3, 1> qs[4];
 
-    model.frame_coordinates(
-        eigen::as_mut_view(q),
-        foot_frames[idx],
-        eigen::as_const_view(q0),
-        model.acquire_workspace());
-    return constraint_advance_time<2>(spatial_constraint(dy, DDP_MOVE(position_target_range_t{q}), foot_frames[idx]));
-  };
+  model.frame_coordinates_precompute(eigen::as_const_view(q0), model.acquire_workspace());
+  for (auto zipped : ranges::zip(qs, foot_frames)) {
+    DDP_BIND(auto&&, (q, frame), zipped);
+    model.frame_coordinates(eigen::as_mut_view(q), frame, model.acquire_workspace());
+  }
 
   auto eq_gen = config_target_range_t{q0};
   auto eq_gen_vel = velocity_target_range_t{eigen::make_matrix<scalar_t>(nv)};
-  auto constr0 = constr_feet(0);
-  auto constr1 = constr_feet(1);
-  auto constr2 = constr_feet(2);
-  auto constr3 = constr_feet(3);
-  auto constr4 = constraint_advance_time<1>(velocity_constraint(dy, DDP_MOVE(eq_gen_vel)));
-  auto constr5 = constraint_advance_time<2>(config_constraint(dy, DDP_MOVE(eq_gen)));
 
-  auto constr = concat_constraint(constr0, constr1, constr2, constr3, constr4, constr5);
+  auto constr0 = constraint_advance_time<2>(
+      spatial_constraint(dy, DDP_MOVE(position_target_range_t{qs[0], qs[1], qs[2], qs[3]}), foot_frames));
+  auto constr1 = constraint_advance_time<1>(velocity_constraint(dy, DDP_MOVE(eq_gen_vel)));
+  auto constr2 = constraint_advance_time<2>(config_constraint(dy, DDP_MOVE(eq_gen)));
+
+  auto constr = concat_constraint(constr0, constr1, constr2);
 
   auto prob_ = problem(0, horizon, 1.0, dy, constr);
 

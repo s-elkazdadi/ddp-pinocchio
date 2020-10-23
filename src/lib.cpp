@@ -131,19 +131,19 @@ void set_assert_params(          //
 
 } // namespace assertion
 
-[[noreturn]] void fast_fail(fmt::string_view message) noexcept {
+[[noreturn]] void fast_fail(fmt::string_view message) {
   print_msg(message);
   std::terminate();
 }
 
-void print_msg(fmt::string_view message) noexcept {
+void print_msg(fmt::string_view message) {
   std::fwrite(message.data(), 1, message.size(), stderr);
   std::fputc('\n', stderr);
 }
 
 struct file_t {
   file_t(file_t const&) = delete;
-  file_t(file_t&& other) noexcept : m_ptr{other.m_ptr} { other.m_ptr = nullptr; };
+  file_t(file_t&& other) : m_ptr{other.m_ptr} { other.m_ptr = nullptr; };
   auto operator=(file_t const&) -> file_t = delete;
   auto operator=(file_t&&) -> file_t = delete;
 
@@ -160,7 +160,7 @@ struct file_t {
     }
   }
 
-  auto ptr() const noexcept -> std::FILE* { return static_cast<std::FILE*>(m_ptr); }
+  auto ptr() const -> std::FILE* { return static_cast<std::FILE*>(m_ptr); }
 
 private:
   gsl::owner<std::FILE*> m_ptr;

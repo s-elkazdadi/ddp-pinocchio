@@ -23,7 +23,7 @@
 #include <Eigen/Core>
 #include <fmt/core.h>
 
-#define DDP_DECLVAL(...) static_cast<__VA_ARGS__ (*)() noexcept>(nullptr)()
+#define DDP_DECLVAL(...) static_cast<__VA_ARGS__ (*)()>(nullptr)()
 #define DDP_SIZEOF(...) static_cast<::ddp::index_t>(sizeof(__VA_ARGS__))
 #define DDP_VSIZEOF(...) static_cast<::ddp::index_t>(sizeof...(__VA_ARGS__))
 #define DDP_MOVE(...) static_cast<typename ::std::remove_reference<decltype(__VA_ARGS__)>::type&&>(__VA_ARGS__)
@@ -69,8 +69,8 @@ using owner = T;
 
 namespace ddp {
 
-[[noreturn]] void fast_fail(fmt::string_view message) noexcept;
-void print_msg(fmt::string_view message) noexcept;
+[[noreturn]] void fast_fail(fmt::string_view message);
+void print_msg(fmt::string_view message);
 
 struct log_file_t {
   std::FILE* ptr;
@@ -162,10 +162,10 @@ public:
   static constexpr bool known_at_compile_time = false;
   static constexpr index_t value_at_compile_time = Eigen::Dynamic;
 
-  constexpr dyn_index() noexcept : m_value{} {}
-  explicit constexpr dyn_index(index_t value) noexcept : m_value{value} {}
+  constexpr dyn_index() : m_value{} {}
+  explicit constexpr dyn_index(index_t value) : m_value{value} {}
   template <index_t N>
-  explicit constexpr dyn_index(fix_index<N>) noexcept : m_value{N} {}
+  explicit constexpr dyn_index(fix_index<N>) : m_value{N} {}
   constexpr auto value() const -> index_t { return m_value; }
 
   // clang-format off
@@ -180,27 +180,27 @@ struct fix_index {
   static constexpr bool known_at_compile_time = true;
   static constexpr const index_t value_at_compile_time = N;
 
-  constexpr fix_index() noexcept = default;
-  explicit constexpr fix_index(index_t value) noexcept {
+  constexpr fix_index() = default;
+  explicit constexpr fix_index(index_t value) {
 #if __cplusplus >= 201402L
     DDP_ASSERT(value == N);
 #endif
   }
-  explicit constexpr fix_index(dyn_index value) noexcept : fix_index{value.value()} {}
+  explicit constexpr fix_index(dyn_index value) : fix_index{value.value()} {}
 
   constexpr auto value() const -> index_t { return N; }
 
   // clang-format off
-  template <index_t M> friend auto operator+(fix_index<N>, fix_index<M>) noexcept -> fix_index<N + M> { return {}; }
-  template <index_t M> friend auto operator-(fix_index<N>, fix_index<M>) noexcept -> fix_index<N - M> { return {}; }
-  template <index_t M> friend auto operator*(fix_index<N>, fix_index<M>) noexcept -> fix_index<N * M> { return {}; }
+  template <index_t M> friend auto operator+(fix_index<N>, fix_index<M>)   -> fix_index<N + M> { return {}; }
+  template <index_t M> friend auto operator-(fix_index<N>, fix_index<M>)   -> fix_index<N - M> { return {}; }
+  template <index_t M> friend auto operator*(fix_index<N>, fix_index<M>)   -> fix_index<N * M> { return {}; }
 
-  friend auto operator+(dyn_index n, fix_index) noexcept -> dyn_index { return dyn_index{n.value() + N}; }
-  friend auto operator+(fix_index, dyn_index n) noexcept -> dyn_index { return dyn_index{n.value() + N}; }
-  friend auto operator-(dyn_index n, fix_index) noexcept -> dyn_index { return dyn_index{n.value() - N}; }
-  friend auto operator-(fix_index, dyn_index n) noexcept -> dyn_index { return dyn_index{n.value() - N}; }
-  friend auto operator*(dyn_index n, fix_index) noexcept -> dyn_index { return dyn_index{n.value() * N}; }
-  friend auto operator*(fix_index, dyn_index n) noexcept -> dyn_index { return dyn_index{n.value() * N}; }
+  friend auto operator+(dyn_index n, fix_index)   -> dyn_index { return dyn_index{n.value() + N}; }
+  friend auto operator+(fix_index, dyn_index n)   -> dyn_index { return dyn_index{n.value() + N}; }
+  friend auto operator-(dyn_index n, fix_index)   -> dyn_index { return dyn_index{n.value() - N}; }
+  friend auto operator-(fix_index, dyn_index n)   -> dyn_index { return dyn_index{n.value() - N}; }
+  friend auto operator*(dyn_index n, fix_index)   -> dyn_index { return dyn_index{n.value() * N}; }
+  friend auto operator*(fix_index, dyn_index n)   -> dyn_index { return dyn_index{n.value() * N}; }
   // clang-format on
 };
 
@@ -236,22 +236,22 @@ enum ternary_e { yes, no, maybe };
   template <typename N, typename M, typename Enable = void>                                                            \
   struct Impl_Name {                                                                                                   \
     static constexpr ternary_e value = maybe;                                                                          \
-    static constexpr void assertion(N n, M m) noexcept { DDP_ASSERT(Run_Time_Cond); };                                 \
+    static constexpr void assertion(N n, M m) { DDP_ASSERT(Run_Time_Cond); };                                          \
   };                                                                                                                   \
                                                                                                                        \
   template <index_t N, index_t M>                                                                                      \
   struct Impl_Name<fix_index<N>, fix_index<M>, typename std::enable_if<not(Compile_Time_Cond)>::type> {                \
     static constexpr ternary_e value = no;                                                                             \
-    static constexpr void assertion(fix_index<N>, fix_index<M>) noexcept = delete;                                     \
+    static constexpr void assertion(fix_index<N>, fix_index<M>) = delete;                                              \
   };                                                                                                                   \
                                                                                                                        \
   template <index_t N, index_t M>                                                                                      \
   struct Impl_Name<fix_index<N>, fix_index<M>, typename std::enable_if<(Compile_Time_Cond)>::type> {                   \
     static constexpr ternary_e value = yes;                                                                            \
-    static constexpr void assertion(fix_index<N>, fix_index<M>) noexcept {};                                           \
+    static constexpr void assertion(fix_index<N>, fix_index<M>){};                                                     \
   };                                                                                                                   \
   template <typename N, typename M>                                                                                    \
-  constexpr void Assert_Name(N n, M m) noexcept {                                                                      \
+  constexpr void Assert_Name(N n, M m) {                                                                               \
     Impl_Name<N, M>::assertion(n, m); /* NOLINT(bugprone-macro-parentheses) */                                         \
   }                                                                                                                    \
   static_assert(true, "")
@@ -348,7 +348,7 @@ struct sum_impl;
 template <>
 struct sum_impl<true> {
   template <typename T, typename... Ts>
-  static auto run(T const& first, Ts const&... rest) noexcept
+  static auto run(T const& first, Ts const&... rest)
       -> decltype(first + sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(rest...)) {
 
     return first + sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(rest...);
@@ -358,7 +358,7 @@ struct sum_impl<true> {
 template <>
 struct sum_impl<false> {
   template <typename T1, typename T2>
-  static auto run(T1 const& first, T2 const& second) noexcept -> decltype(first + second) {
+  static auto run(T1 const& first, T2 const& second) -> decltype(first + second) {
     return first + second;
   }
 };
@@ -458,7 +458,7 @@ template <
          detail::all_same_or_dyn(detail::get_dims<Ts...>::rows, DDP_VSIZEOF(Ts)) and //
          detail::all_same_or_dyn(detail::get_dims<Ts...>::cols, DDP_VSIZEOF(Ts))),   //
         int>::type = 0>
-auto sum(Ts const&... args) noexcept -> decltype(detail::sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(args...)) {
+auto sum(Ts const&... args) -> decltype(detail::sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(args...)) {
   index_t const all_rows[] = {args.rows()...};
   index_t const all_cols[] = {args.cols()...};
   for (index_t i = 0; i < DDP_VSIZEOF(Ts) - 1; ++i) {
@@ -481,7 +481,7 @@ template <
              detail::get_dims<Ts...>::cols,   //
              DDP_VSIZEOF(Ts))),
         int>::type = 0>
-auto prod(Ts const&... args) noexcept -> decltype(detail::sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(args...)) {
+auto prod(Ts const&... args) -> decltype(detail::sum_impl<(DDP_VSIZEOF(Ts) > 2)>::run(args...)) {
   index_t const all_rows[] = {args.rows()...};
   index_t const all_cols[] = {args.cols()...};
   for (index_t i = 0; i < DDP_VSIZEOF(Ts) - 1; ++i) {
@@ -499,7 +499,7 @@ auto prod(Ts const&... args) noexcept -> decltype(detail::sum_impl<(DDP_VSIZEOF(
 }
 
 template <typename T>
-auto as_mut_view(T&& mat) noexcept                                                          //
+auto as_mut_view(T&& mat)                                                                   //
     -> view_t<                                                                              //
         Eigen::Matrix<                                                                      //
             typename std::remove_reference<T>::type::Scalar,                                //
@@ -514,7 +514,7 @@ auto as_mut_view(T&& mat) noexcept                                              
 }
 
 template <typename T>
-auto as_const_view(T const& mat) noexcept                      //
+auto as_const_view(T const& mat)                               //
     -> view_t<                                                 //
         Eigen::Matrix<                                         //
             typename T::Scalar,                                //
@@ -688,6 +688,42 @@ auto split_at_mut(T&& mat, Row_Idx row_idx, Col_Idx col_idx) DDP_PRECOND_DECLTYP
 template <typename T> auto rows(T const& mat) -> row_kind<T> { return row_kind<T>{mat.rows()}; }
 template <typename T> auto cols(T const& mat) -> col_kind<T> { return col_kind<T>{mat.rows()}; }
 // clang-format on
+
+template <typename T>
+struct into_view_t {
+  T* data;
+  index_t rows;
+  index_t cols;
+  index_t outer_stride;
+
+  template <typename View>
+  operator/* NOLINT(hicpp-explicit-conversions) */ View() const {
+    if (View::RowsAtCompileTime != Eigen::Dynamic) {
+      DDP_ASSERT(rows == View::RowsAtCompileTime);
+    }
+    if (View::ColsAtCompileTime != Eigen::Dynamic) {
+      DDP_ASSERT(cols == View::ColsAtCompileTime);
+    }
+    if (View::MaxRowsAtCompileTime != Eigen::Dynamic) {
+      DDP_ASSERT(rows <= View::MaxRowsAtCompileTime);
+    }
+    if (View::MaxColsAtCompileTime != Eigen::Dynamic) {
+      DDP_ASSERT(cols <= View::MaxColsAtCompileTime);
+    }
+    return {data, rows, cols, outer_stride};
+  }
+};
+
+template <typename T>
+auto into_view(view_t<T> mat)
+    -> into_view_t<DDP_CONDITIONAL(std::is_const<T>::value, typename T::Scalar const, typename T::Scalar)> {
+  return {
+      mat.data(),
+      mat.rows(),
+      mat.cols(),
+      mat.outerStride(),
+  };
+}
 
 } // namespace eigen
 } // namespace ddp

@@ -38,8 +38,8 @@ struct tuple {
   };
 
   indexed_tuple<make_index_sequence<DDP_VSIZEOF(Ts)>> _m_impl;
-  tuple(Ts... args) noexcept : _m_impl{static_cast<Ts&&>(args)...} {}
-  tuple() noexcept = default;
+  tuple(Ts... args) : _m_impl{static_cast<Ts&&>(args)...} {}
+  tuple() = default;
 };
 
 template <typename... Ts>
@@ -48,12 +48,12 @@ auto make_tuple(Ts... args) -> tuple<Ts...> {
 }
 
 template <index_t I, typename... Ts>
-auto get(tuple<Ts...>& tup) noexcept -> decltype(detail::get_mut<I>(tup._m_impl)) {
+auto get(tuple<Ts...>& tup) -> decltype(detail::get_mut<I>(tup._m_impl)) {
   return detail::get_mut<I>(tup._m_impl);
 }
 
 template <index_t I, typename... Ts>
-auto get(tuple<Ts...> const& tup) noexcept -> decltype(detail::get_const<I>(tup._m_impl)) {
+auto get(tuple<Ts...> const& tup) -> decltype(detail::get_const<I>(tup._m_impl)) {
   return detail::get_const<I>(tup._m_impl);
 }
 
@@ -73,7 +73,7 @@ template <typename... Iters>
 struct zip_iterator_t {
   detail::tuple<Iters...> m_iters;
 
-  zip_iterator_t(Iters... iters) noexcept : m_iters(DDP_MOVE(iters)...) {}
+  zip_iterator_t(Iters... iters) : m_iters(DDP_MOVE(iters)...) {}
   zip_iterator_t() = default;
 
   using difference_type = std::ptrdiff_t;
@@ -83,17 +83,17 @@ struct zip_iterator_t {
   using iterator_category = std::input_iterator_tag;
 
   template <index_t... Is>
-  void increment_impl(std::integer_sequence<index_t, Is...>) noexcept {
+  void increment_impl(std::integer_sequence<index_t, Is...>) {
     int const dummy[] = {((void)(++detail::get<Is>(m_iters)), 0)...};
     (void)dummy;
   }
   template <index_t... Is>
-  void decrement_impl(std::integer_sequence<index_t, Is...>) noexcept {
+  void decrement_impl(std::integer_sequence<index_t, Is...>) {
     int const dummy[] = {((void)(--detail::get<Is>(m_iters)), 0)...};
     (void)dummy;
   }
   template <index_t... Is>
-  auto deref_impl(std::integer_sequence<index_t, Is...>) noexcept -> reference {
+  auto deref_impl(std::integer_sequence<index_t, Is...>) -> reference {
     return reference{*detail::get<Is>(m_iters)...};
   }
 
@@ -109,18 +109,18 @@ struct zip_iterator_t {
   }
 
   using index_seq = detail::make_index_sequence<DDP_VSIZEOF(Iters)>;
-  auto operator++() noexcept -> zip_iterator_t& {
+  auto operator++() -> zip_iterator_t& {
     this->increment_impl(index_seq{});
     return *this;
   }
-  auto operator--() noexcept -> zip_iterator_t& {
+  auto operator--() -> zip_iterator_t& {
     this->decrement_impl(index_seq{});
     return *this;
   }
   friend auto operator==(zip_iterator_t a, zip_iterator_t b) -> bool {
     return zip_iterator_t::cmp_eq_impl(a, b, index_seq{});
   }
-  auto operator*() noexcept -> reference { return this->deref_impl(index_seq{}); }
+  auto operator*() -> reference { return this->deref_impl(index_seq{}); }
   DDP_REDUNDANT_BIDIRECTIONAL_ITER_METHODS(zip_iterator_t);
 };
 
@@ -130,7 +130,7 @@ template <typename... Rngs>
 struct zip_range_t {
   detail::tuple<Rngs...> m_rngs;
 
-  zip_range_t(Rngs... rngs) noexcept : m_rngs(static_cast<Rngs&&>(rngs)...) {}
+  zip_range_t(Rngs... rngs) : m_rngs(static_cast<Rngs&&>(rngs)...) {}
 
   using iterator = zip_iterator_t<decltype(begin(DDP_DECLVAL(Rngs)))...>;
   using const_iterator = zip_iterator_t<decltype(begin(DDP_DECLVAL(Rngs const)))...>;
@@ -138,26 +138,26 @@ struct zip_range_t {
   using index_seq = detail::make_index_sequence<DDP_VSIZEOF(Rngs)>;
 
   template <index_t... Is>
-  auto begin_mut_impl(std::integer_sequence<index_t, Is...>) noexcept -> iterator {
+  auto begin_mut_impl(std::integer_sequence<index_t, Is...>) -> iterator {
     return iterator{begin(detail::get<Is>(m_rngs))...};
   }
   template <index_t... Is>
-  auto begin_const_impl(std::integer_sequence<index_t, Is...>) const noexcept -> const_iterator {
+  auto begin_const_impl(std::integer_sequence<index_t, Is...>) const -> const_iterator {
     return const_iterator{begin(detail::get<Is>(m_rngs))...};
   }
   template <index_t... Is>
-  auto end_mut_impl(std::integer_sequence<index_t, Is...>) noexcept -> iterator {
+  auto end_mut_impl(std::integer_sequence<index_t, Is...>) -> iterator {
     return iterator{end(detail::get<Is>(m_rngs))...};
   }
   template <index_t... Is>
-  auto end_const_impl(std::integer_sequence<index_t, Is...>) const noexcept -> const_iterator {
+  auto end_const_impl(std::integer_sequence<index_t, Is...>) const -> const_iterator {
     return const_iterator{end(detail::get<Is>(m_rngs))...};
   }
 
-  friend auto begin(zip_range_t& zip) noexcept -> iterator { return zip.begin_mut_impl(index_seq{}); }
-  friend auto begin(zip_range_t const& zip) noexcept -> const_iterator { return zip.begin_const_impl(index_seq{}); }
-  friend auto end(zip_range_t& zip) noexcept -> iterator { return zip.end_mut_impl(index_seq{}); }
-  friend auto end(zip_range_t const& zip) noexcept -> const_iterator { return zip.end_const_impl(index_seq{}); }
+  friend auto begin(zip_range_t& zip) -> iterator { return zip.begin_mut_impl(index_seq{}); }
+  friend auto begin(zip_range_t const& zip) -> const_iterator { return zip.begin_const_impl(index_seq{}); }
+  friend auto end(zip_range_t& zip) -> iterator { return zip.end_mut_impl(index_seq{}); }
+  friend auto end(zip_range_t const& zip) -> const_iterator { return zip.end_const_impl(index_seq{}); }
 };
 
 template <typename Rng>
@@ -169,10 +169,10 @@ struct reversed_range_t {
   using reverse_iterator = typename Rng::iterator;
   using const_reverse_iterator = typename Rng::const_iterator;
 
-  friend auto begin(reversed_range_t& rng) noexcept -> iterator { return iterator{end(rng.m_rng)}; }
-  friend auto begin(reversed_range_t const& rng) noexcept -> const_iterator { return const_iterator{end(rng.m_rng)}; }
-  friend auto end(reversed_range_t& rng) noexcept -> iterator { return iterator{begin(rng.m_rng)}; }
-  friend auto end(reversed_range_t const& rng) noexcept -> const_iterator { return const_iterator{begin(rng.m_rng)}; }
+  friend auto begin(reversed_range_t& rng) -> iterator { return iterator{end(rng.m_rng)}; }
+  friend auto begin(reversed_range_t const& rng) -> const_iterator { return const_iterator{end(rng.m_rng)}; }
+  friend auto end(reversed_range_t& rng) -> iterator { return iterator{begin(rng.m_rng)}; }
+  friend auto end(reversed_range_t const& rng) -> const_iterator { return const_iterator{begin(rng.m_rng)}; }
 };
 
 template <typename... Rngs>

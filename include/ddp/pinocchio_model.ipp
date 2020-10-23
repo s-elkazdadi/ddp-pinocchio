@@ -126,7 +126,7 @@ struct builder_from_urdf_t {
 
 template <typename T, index_t Nq, index_t Nv>
 template <typename Model_Builder>
-model_t<T, Nq, Nv>::model_t(Model_Builder&& model_builder, index_t n_parallel) noexcept(false) {
+model_t<T, Nq, Nv>::model_t(Model_Builder&& model_builder, index_t n_parallel) {
 
   DDP_ASSERT_MSG_ALL_OF( //
       ("invalid parallelization parameter", n_parallel > 0),
@@ -162,16 +162,16 @@ model_t<T, Nq, Nv>::model_t(Model_Builder&& model_builder, index_t n_parallel) n
 }
 
 template <typename T, index_t Nq, index_t Nv>
-model_t<T, Nq, Nv>::model_t(fmt::string_view urdf_path, index_t n_parallel) noexcept(false)
+model_t<T, Nq, Nv>::model_t(fmt::string_view urdf_path, index_t n_parallel)
     : model_t{detail::builder_from_urdf_t{urdf_path}, n_parallel} {}
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::all_joints_test_model(index_t n_parallel) noexcept(false) -> model_t {
+auto model_t<T, Nq, Nv>::all_joints_test_model(index_t n_parallel) -> model_t {
   return model_t{::pinocchio::buildAllJointsModel, n_parallel};
 }
 
 template <typename T, index_t Nq, index_t Nv>
-model_t<T, Nq, Nv>::~model_t() noexcept {
+model_t<T, Nq, Nv>::~model_t() {
   DDP_ASSERT(
       "model and data should either be both valid or both invalid (moved-from state)",
       (m_model == nullptr) == (m_data == nullptr));
@@ -190,7 +190,7 @@ model_t<T, Nq, Nv>::~model_t() noexcept {
 }
 
 template <typename T, index_t Nq, index_t Nv>
-model_t<T, Nq, Nv>::model_t(model_t&& other) noexcept {
+model_t<T, Nq, Nv>::model_t(model_t&& other) {
   m_model = static_cast<gsl::owner<impl_model_t*>>(other.m_model);
   m_data = static_cast<gsl::owner<impl_data_t*>>(other.m_data);
   m_num_data = other.m_num_data;
@@ -202,7 +202,7 @@ model_t<T, Nq, Nv>::model_t(model_t&& other) noexcept {
 }
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::acquire_workspace() const noexcept -> key {
+auto model_t<T, Nq, Nv>::acquire_workspace() const -> key {
   for (index_t i = 0; i < m_num_data; ++i) {
     std::atomic<bool>& available = m_data[i].m_available;
 
@@ -219,19 +219,19 @@ auto model_t<T, Nq, Nv>::acquire_workspace() const noexcept -> key {
 }
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::model_name() const noexcept -> fmt::string_view {
+auto model_t<T, Nq, Nv>::model_name() const -> fmt::string_view {
   return m_model->m_impl.name;
 }
 
 template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::neutral_configuration(mut_view_t<Nq> out_q) const noexcept {
+void model_t<T, Nq, Nv>::neutral_configuration(mut_view_t<Nq> out_q) const {
 
   DDP_ASSERT_MSG("output configuration vector is not correctly sized", out_q.rows() == m_config_dim);
   ::pinocchio::neutral(m_model->m_impl, out_q);
 }
 
 template <typename T, index_t Nq, index_t Nv>
-void model_t<T, Nq, Nv>::random_configuration(mut_view_t<Nq> out_q) const noexcept {
+void model_t<T, Nq, Nv>::random_configuration(mut_view_t<Nq> out_q) const {
 
   DDP_ASSERT_MSG("output configuration vector is not correctly sized", out_q.rows() == m_config_dim);
   ::pinocchio::randomConfiguration(       //
@@ -247,7 +247,7 @@ void model_t<T, Nq, Nv>::integrate(
     mut_view_t<Nq> out_q, //
     const_view_t<Nq> q,   //
     const_view_t<Nv> v    //
-) const noexcept {
+) const {
   DDP_ASSERT_MSG_ALL_OF(
       ("configuration vector is not correctly sized", q.rows() == m_config_dim),
       ("tangent vector is not correctly sized", v.rows() == m_tangent_dim),
@@ -263,7 +263,7 @@ void model_t<T, Nq, Nv>::d_integrate_dq(
     mut_view_t<Nv, Nv> out_q_dq, //
     const_view_t<Nq> q,          //
     const_view_t<Nv> v           //
-) const noexcept {
+) const {
   DDP_ASSERT_MSG_ALL_OF(
       ("output jacobian matrix has the wrong number of rows", out_q_dq.rows() == m_tangent_dim),
       ("output jacobian matrix has the wrong number of columns", out_q_dq.cols() == m_tangent_dim),
@@ -279,7 +279,7 @@ void model_t<T, Nq, Nv>::d_integrate_dv(
     mut_view_t<Nv, Nv> out_q_dv, //
     const_view_t<Nq> q,          //
     const_view_t<Nv> v           //
-) const noexcept {
+) const {
 
   DDP_ASSERT_MSG_ALL_OF(
       ("output jacobian has the wrong number of rows", out_q_dv.rows() == m_tangent_dim),
@@ -296,7 +296,7 @@ void model_t<T, Nq, Nv>::difference(
     mut_view_t<Nv> out_v,     //
     const_view_t<Nq> q_start, //
     const_view_t<Nq> q_finish //
-) const noexcept {
+) const {
 
   DDP_ASSERT_MSG_ALL_OF(
       ("output tangent vector is not correctly sized", out_v.rows() == m_tangent_dim),
@@ -313,7 +313,7 @@ void model_t<T, Nq, Nv>::d_difference_dq_start(
     mut_view_t<Nv, Nv> out_v_dq_start, //
     const_view_t<Nq> q_start,          //
     const_view_t<Nq> q_finish          //
-) const noexcept {
+) const {
 
   DDP_ASSERT_MSG_ALL_OF(
       ("output jacobian has the wrong number of rows", out_v_dq_start.rows() == m_tangent_dim),
@@ -331,7 +331,7 @@ void model_t<T, Nq, Nv>::d_difference_dq_finish(
     mut_view_t<Nv, Nv> out_v_dq_finish, //
     const_view_t<Nq> q_start,           //
     const_view_t<Nq> q_finish           //
-) const noexcept {
+) const {
 
   DDP_ASSERT_MSG_ALL_OF(
       ("output jacobian has the wrong number of rows", out_v_dq_finish.rows() == m_tangent_dim),
@@ -364,7 +364,7 @@ auto model_t<T, Nq, Nv>::dynamics_aba( //
     const_view_t<Nv> v,                //
     const_view_t<Nv> tau,              //
     key k                              //
-) const noexcept -> key {
+) const -> key {
 
   DDP_ASSERT_MSG_ALL_OF(
       ("output acceleration vector is not correctly sized", out_acceleration.rows() == m_tangent_dim),
@@ -392,7 +392,7 @@ auto model_t<T, Nq, Nv>::d_dynamics_aba(      //
     const_view_t<Nv> v,                       //
     const_view_t<Nv> tau,                     //
     key k                                     //
-) const noexcept -> key {
+) const -> key {
 
   DDP_ASSERT_MSG_ALL_OF(
       ("output acceleration jacobian with respect to the velocity has the wrong number of rows",
@@ -448,33 +448,49 @@ namespace ddp {
 namespace pinocchio {
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::frame_coordinates(mut_view_t<3> out, index_t i, const_view_t<Nq> q, key k) const noexcept
-    -> key {
+auto model_t<T, Nq, Nv>::frame_coordinates_precompute(const_view_t<Nq> q, key k) const -> key {
   DDP_ASSERT_MSG_ALL_OF( //
-      ("frame index must be in bounds", i >= 0),
-      ("frame index must be in bounds", i < m_model->m_impl.nframes),
-
       ("configuration vector is not correctly sized", q.rows() == m_config_dim),
       ("invalid data", not q.hasNaN()),
       ("invalid workspace key", static_cast<void*>(k.m_parent) != nullptr));
 
   impl_data_t* data = k.m_parent;
   ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
+  return k;
+}
+
+template <typename T, index_t Nq, index_t Nv>
+auto model_t<T, Nq, Nv>::frame_coordinates(mut_view_t<3> out, index_t i, key k) const -> key {
+  DDP_ASSERT_MSG_ALL_OF( //
+      ("frame index must be in bounds", i >= 0),
+      ("frame index must be in bounds", i < m_model->m_impl.nframes),
+      ("invalid workspace key", static_cast<void*>(k.m_parent) != nullptr));
+
+  impl_data_t* data = k.m_parent;
   out = data->m_impl.oMf[static_cast<std::size_t>(i)].translation();
   return k;
 };
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, const_view_t<Nq> q, key k) const noexcept
-    -> key {
+auto model_t<T, Nq, Nv>::dframe_coordinates_precompute(const_view_t<Nq> q, key k) const -> key {
+  DDP_ASSERT_MSG_ALL_OF( //
+      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
+      ("invalid data", not q.hasNaN()),
+      ("invalid workspace key", static_cast<void*>(k.m_parent) != nullptr));
+
+  impl_data_t* data = k.m_parent;
+  ::pinocchio::computeJointJacobians(m_model->m_impl, data->m_impl, q);
+  ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
+  return k;
+}
+
+template <typename T, index_t Nq, index_t Nv>
+auto model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, key k) const -> key {
   DDP_ASSERT_MSG_ALL_OF( //
       ("frame index must be in bounds", i >= 0),
       ("frame index must be in bounds", i < m_model->m_impl.nframes),
 
       ("output constraint jacobian matrix is not correctly sized", out.cols() == m_tangent_dim),
-
-      ("configuration vector is not correctly sized", q.rows() == m_config_dim),
-      ("invalid data", not q.hasNaN()),
       ("invalid workspace key", static_cast<void*>(k.m_parent) != nullptr));
 
   impl_data_t* data = k.m_parent;
@@ -491,8 +507,6 @@ auto model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, c
 
   Eigen::Map<decltype(workspace)> w{workspace.data(), 6, nv.value()};
 
-  ::pinocchio::computeJointJacobians(m_model->m_impl, data->m_impl, q);
-  ::pinocchio::framesForwardKinematics(m_model->m_impl, data->m_impl, q);
   ::pinocchio::getFrameJacobian(
       m_model->m_impl,
       data->m_impl,
@@ -504,12 +518,12 @@ auto model_t<T, Nq, Nv>::d_frame_coordinates(mut_view_t<3, Nv> out, index_t i, c
 };
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::n_frames() const noexcept -> index_t {
+auto model_t<T, Nq, Nv>::n_frames() const -> index_t {
   return m_model->m_impl.nframes;
 }
 
 template <typename T, index_t Nq, index_t Nv>
-auto model_t<T, Nq, Nv>::frame_name(index_t i) const noexcept -> fmt::string_view {
+auto model_t<T, Nq, Nv>::frame_name(index_t i) const -> fmt::string_view {
   DDP_ASSERT_MSG_ALL_OF( //
       ("frame index must be in bounds", i >= 0),
       ("frame index must be in bounds", i < m_model->m_impl.nframes));
