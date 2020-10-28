@@ -94,7 +94,7 @@ auto main() -> int {
   {
     using std::pow;
 
-    constexpr auto M = method::primal_dual_constant_multipliers;
+    constexpr auto M = method::primal_dual_affine_multipliers;
 
     auto derivs = solver.uninit_derivative_storage();
 
@@ -106,7 +106,33 @@ auto main() -> int {
     for (auto xu : traj) {
       fmt::print("x: {}\nu: {}\n", xu.x().transpose(), xu.u().transpose());
     }
-    fmt::print("x: {}\n", traj.x_f().transpose());
+
+    auto new_traj = traj.clone();
+
+    auto rnd = eigen::make_matrix<scalar_t>(eigen::rows_c(x_init));
+
+    while (true) {
+      long double eps{};
+      std::scanf("%Lf", &eps);
+      fmt::print("eps: {}\n", eps);
+      auto const& traj_c = traj;
+
+      for (auto zipped : ranges::zip(traj_c, new_traj, fb)) {
+        rnd.setRandom();
+        DDP_BIND(auto, (xu, new_xu, K), zipped);
+        new_xu.u() = xu.u() + K.jac() * (new_xu.x() - xu.x());
+        prob.eval_f_to(new_xu.x_next(), new_xu.current_index(), new_xu.as_const().x(), new_xu.as_const().u());
+        new_xu.x_next() += eps * rnd;
+      }
+
+      for (auto xu : new_traj) {
+        index_t t = xu.current_index();
+        auto eq = eigen::make_matrix<scalar_t>(prob.constraint().eq_dim(t));
+        prob.eval_eq_to(eigen::as_mut_view(eq), t, xu.as_const().x(), xu.as_const().u());
+        if (eq.size() > 0) {
+          fmt::print("{}\n", eq.norm());
+        }
+      }
+    }
   }
 }
-

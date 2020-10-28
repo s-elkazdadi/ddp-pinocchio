@@ -681,7 +681,11 @@ struct ddp_solver_t {
       scalar_t const& n,
       scalar_t const& stopping_threshold) const -> detail::tuple<mult_update_attempt_result_e, scalar_t, scalar_t> {
     std::string name = detail::to_owned(prob.name());
-    log_file_t primal_log{("/tmp/" + name + "_primal.dat").c_str()};
+    log_file_t primal_log{((M == method::primal_dual_affine_multipliers //
+                                ? "/tmp/affine_mults_"
+                                : "/tmp/") +
+                           name + "_primal.dat")
+                              .c_str()};
     log_file_t dual_log{("/tmp/" + DDP_MOVE(name) + "_dual.dat").c_str()};
 
     prob.compute_derivatives(derivatives, traj);
@@ -719,7 +723,7 @@ struct ddp_solver_t {
                  fb_seq)) {
           DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
 
-          p_eq.val() += mu * eq.val;
+          p_eq.val() += mu * (eq.val + eq.u * fb.val());
           p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
         }
         return {
@@ -786,7 +790,7 @@ struct ddp_solver_t {
   ddp_solver_t(ddp_solver_t const&) = delete;
   ddp_solver_t(ddp_solver_t&&) = delete;
   auto operator=(ddp_solver_t const&) -> ddp_solver_t& = delete;
-  auto operator=(ddp_solver_t&&) -> ddp_solver_t& = delete;
+  auto operator=(ddp_solver_t &&) -> ddp_solver_t& = delete;
 
   // clang-format off
   template <method M>
@@ -796,7 +800,11 @@ struct ddp_solver_t {
   ) const -> detail::tuple<trajectory_t, control_feedback_t> {
     // clang-format on
     std::string name = detail::to_owned(prob.name());
-    log_file_t traj_log{("/tmp/" + name + "_traj.dat").c_str()};
+    log_file_t traj_log{((M == method::primal_dual_affine_multipliers //
+                              ? "/tmp/affine_mults_"
+                              : "/tmp/") +
+                         name + "_traj.dat")
+                            .c_str()};
 
     auto derivatives = uninit_derivative_storage();
     auto& traj = initial_trajectory;
@@ -815,25 +823,7 @@ struct ddp_solver_t {
     scalar_t w = 1 / mu;
     scalar_t n = 1 / pow(mu, static_cast<scalar_t>(0.1L));
 
-    auto print_traj = [&](index_t iter) {
-      fmt::print(traj_log.ptr, "{:4}: ", iter);
-      char const* outer_sep = "";
-      fmt::print(traj_log.ptr, "[");
-      for (auto xu : traj) {
-        auto x = xu.x();
-
-        char const* inner_sep = "";
-        fmt::print(traj_log.ptr, "{}{}", outer_sep, "[");
-        for (index_t i = 0; i < x.size(); ++i) {
-          fmt::print(traj_log.ptr, "{}{}", inner_sep, x[i]);
-          inner_sep = ", ";
-        }
-        fmt::print(traj_log.ptr, "{}", "]");
-        outer_sep = ", ";
-      }
-      fmt::print(traj_log.ptr, "]\n");
-    };
-    print_traj(0);
+    traj.println_to_file(traj_log.ptr);
 
     for (index_t iter = 0; iter < solver_parameters.max_iterations; ++iter) {
 
@@ -905,7 +895,7 @@ struct ddp_solver_t {
 
         swap(traj, new_traj);
 
-        print_traj(iter + 1);
+        traj.println_to_file(traj_log.ptr);
         fmt::print(stdout, "step: {}\n", step);
         fmt::print(stdout, "eq: ");
       }

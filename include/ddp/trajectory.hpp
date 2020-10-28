@@ -41,6 +41,24 @@ public:
   auto clone() const -> trajectory_t { return trajectory_t{m_state_data.clone(), m_control_data.clone()}; }
   auto horizon() const -> index_t { return m_state_data.idx.n_steps - 1; }
 
+  auto println_to_file(std::FILE* out) const {
+    char const* outer_sep = "";
+    fmt::print(out, "[");
+    for (auto xu : *this) {
+      auto x = xu.x();
+
+      char const* inner_sep = "";
+      fmt::print(out, "{}{}", outer_sep, "[");
+      for (index_t i = 0; i < x.size(); ++i) {
+        fmt::print(out, "{}{}", inner_sep, x[i]);
+        inner_sep = ", ";
+      }
+      fmt::print(out, "{}", "]");
+      outer_sep = ", ";
+    }
+    fmt::print(out, "]\n");
+  }
+
   template <bool IsConst>
   struct proxy_t {
     using x_proxy_t = typename x_mat_seq_t::template proxy_t<IsConst>;
