@@ -681,7 +681,10 @@ auto has_flag(
 }
 
 template <typename CharT, typename Traits>
-void print_n(std::basic_ostream<CharT, Traits>& out, CharT c, size_t n) {
+void print_n(
+    std::basic_ostream<CharT, Traits>& out,
+    typename std::basic_ostream<CharT, Traits>::char_type c,
+    size_t n) {
   constexpr size_t pack_size = 64;
   CharT buffer[pack_size];
   for (auto& e : buffer) {

@@ -3,32 +3,10 @@
 
 #include "mpfr/detail/handle_as_mpfr.hpp"
 #include "mpfr/detail/prologue.hpp"
-#include <iterator>
 
 namespace fmt {
 inline namespace v7 {
-
-namespace detail {
-template <typename T> class buffer;
-struct error_handler;
-} // namespace detail
-
-template <typename Char> class basic_string_view;
-using string_view = basic_string_view<char>;
-
-template <typename Char, typename ErrorHandler> class basic_format_parse_context;
-
 template <typename OutputIt, typename Char> class basic_format_context;
-template <typename Char>
-using buffer_context = basic_format_context<std::back_insert_iterator<detail::buffer<Char>>, Char>;
-using format_context = buffer_context<char>;
-template <typename Context, typename... Args> class format_arg_store;
-template <typename Context, typename... Args>
-inline auto make_format_args(const Args&... args) // NOLINT(readability-redundant-declaration)
-    -> format_arg_store<Context, Args...>;
-
-struct format_args;
-
 template <typename T, typename Char, typename Enable> struct formatter;
 } // namespace v7
 } // namespace fmt
@@ -37,13 +15,7 @@ namespace mpfr {
 namespace _ {
 namespace libfmt {
 
-template <typename String_View, typename... Args>
-auto make_args(Args const&... args) -> ::fmt::format_arg_store<fmt::format_context, Args...> {
-  return ::fmt::make_format_args<::fmt::format_context>(args...);
-}
 template <int, typename T> struct dependent_type { using type = T; };
-template <int> struct dependent_string_view { using type = ::fmt::string_view; };
-template <int> struct dependent_format_args { using type = ::fmt::format_args; };
 
 struct fill_t {
   char data[4];
@@ -80,8 +52,11 @@ public:
 template <typename Iter>
 MPFR_CXX_CONSTEXPR auto read_next_char(Iter& it, Iter end, error_handler_ref_t eh) -> fill_t {
   static_assert(
-      std::is_same<typename std::iterator_traits<Iter>::value_type, char>::value,
-      "only byte char is supported");
+      std::is_same<
+          typename std::remove_const<typename std::remove_reference<decltype(*it)>::type>::type,
+          char>::value,
+      "only narrow char is supported");
+  static_assert(CHAR_BIT == 8, "char is assumed to be 8 bits wide");
 
   int leading_ones = count_leading_zeros(static_cast<unsigned char>(~unsigned(it[0])));
   fill_t ret{};
@@ -108,7 +83,7 @@ constexpr auto is_digit(char c) -> bool {
 }
 
 template <typename Iter>
-MPFR_CXX_CONSTEXPR auto parse_int(Iter& it, Iter end, error_handler_ref_t eh) {
+MPFR_CXX_CONSTEXPR auto parse_int(Iter& it, Iter end, error_handler_ref_t eh) -> int {
   int val = *it - '0';
   ++it;
   while (it < end) {
@@ -459,7 +434,7 @@ public:
 };
 
 template <typename Format_Arg>
-inline void parse_dynamic_args(
+void parse_dynamic_args(
     mp_float_specs& specs, format_context_ref_t<Format_Arg> ctx, error_handler_ref_t eh) {
 
   if (specs.dyn_prec) {
@@ -576,31 +551,32 @@ inline char* format_to_buf(
   return ptr;
 }
 
-template <typename String_View, typename Format_Args> struct out_iter_ref_t {
+struct out_iter_ref_t {
 private:
   void* m_out;
-  void (*m_format_to)(void* out, String_View, Format_Args);
+  void (*m_copy_to)(void* out, char const* begin, char const* end);
 
   template <typename Out_Iter>
-  static auto format_into_out_impl(void* out, String_View format_str, Format_Args args) {
+  static void copy_into_out_impl(void* out, char const* begin, char const* end) {
     Out_Iter& out_concrete = *static_cast<Out_Iter*>(out);
-    out_concrete = vformat_to(out_concrete, format_str, args); // found through adl
+    while (begin != end) {
+      *out_concrete = *begin;
+      ++out_concrete;
+      ++begin;
+    }
   }
 
 public:
   template <typename Out_Iter>
   out_iter_ref_t(Out_Iter* out) // NOLINT(hicpp-explicit-conversions)
-      : m_out{out}, m_format_to{&format_into_out_impl<Out_Iter>} {}
+      : m_out{out}, m_copy_to{&copy_into_out_impl<Out_Iter>} {}
 
-  auto format_into_out(String_View format_str, Format_Args args) {
-    m_format_to(m_out, format_str, args);
-  }
+  void copy_into_out(char const* begin, char const* end) const { m_copy_to(m_out, begin, end); }
 };
 
-template <typename String_View, typename Format_Args>
-void format_impl(
+inline void format_impl(
     mpfr_cref_t value,
-    out_iter_ref_t<String_View, Format_Args> out,
+    out_iter_ref_t out,
     char* stack_buffer,
     std::size_t stack_bufsize,
     mp_float_specs const& specs) {
@@ -630,48 +606,57 @@ void format_impl(
       specs,
       value);
 
-  char const* fmt_format_parts[] = {
-      "{0:",
-      "<{1}}{2}{0:",
-      "<{3}}{4}{5}{0:0<{6}}{0:",
-      "<{7}}",
-  };
-  std::size_t sizes[] = {
-      std::strlen(fmt_format_parts[0]),
-      std::strlen(fmt_format_parts[1]),
-      std::strlen(fmt_format_parts[2]),
-      std::strlen(fmt_format_parts[3]),
+  alignas(0x400) char buffer[0x400];
+
+  char* pos = buffer;
+  size_t space = sizeof(buffer);
+
+  auto flush_buf = [&] {
+    out.copy_into_out(buffer, pos);
+    pos = buffer;
+    space = sizeof(buffer);
   };
 
-  char fmt_format[256]{};
-  char* fmt_ptr = fmt_format;
-
-  for (int i = 0; i < 4; ++i) {
-    std::memcpy(fmt_ptr, fmt_format_parts[i], sizes[i]);
-    fmt_ptr += sizes[i];
-
-    if (i < 3) {
-      std::memcpy(fmt_ptr, specs.fill.data, specs.fill.size);
-      fmt_ptr += specs.fill.size;
-    } else {
-      *fmt_ptr = '\0';
+  auto chars_to_buf = [&](char const* begin, std::size_t len) {
+    while (len > 0) {
+      if (len <= space) {
+        std::memcpy(pos, begin, len);
+        pos += len;
+        space -= len;
+        return;
+      } else {
+        std::memcpy(pos, begin, space);
+        len -= space;
+        flush_buf();
+      }
     }
+  };
+
+  auto fill_n = [&](size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+      chars_to_buf(specs.fill.data, specs.fill.size);
+    }
+  };
+
+  fill_n(left_padding);
+  (signbit ? chars_to_buf("-", 1) : specs.sign == sign_e::plus ? chars_to_buf("+", 1) : (void)0);
+  fill_n(0); // inner padding?
+  chars_to_buf(ptr, std::strlen(ptr));
+  ((zero_padding > 0) ? chars_to_buf(".", 1) : (void)0);
+  for (size_t i = 0; i < zero_padding; ++i) {
+    chars_to_buf("0", 1);
   }
-
-  String_View format_str = {fmt_format, static_cast<std::size_t>(fmt_ptr - fmt_format)};
-
-  char const* const a0 = "";
-  size_t const a1 = left_padding;
-  char const* const a2 = signbit ? "-" : specs.sign == sign_e::plus ? "+" : "";
-  size_t const a3 = 0;
-  char const* const a4 = ptr;
-  char const* const a5 = zero_padding > 0 ? "." : "";
-  size_t const a6 = zero_padding > 0 ? (zero_padding - 1) : 0;
-  size_t const a7 = right_padding;
-
-  auto const storage = make_args<String_View>(a0, a1, a2, a3, a4, a5, a6, a7);
-  out.format_into_out(format_str, storage);
+  fill_n(right_padding);
+  flush_buf();
 }
+
+struct base_parser {
+  template <typename Parse_Context>
+  MPFR_CXX_CONSTEXPR auto parse(Parse_Context& ctx) -> typename Parse_Context::iterator {
+    return ::mpfr::_::libfmt::parse_mp_float_type_specs(specs, ctx);
+  }
+  mp_float_specs specs;
+};
 
 } // namespace libfmt
 } // namespace _
@@ -679,47 +664,31 @@ void format_impl(
 
 namespace fmt {
 
-template <mpfr::precision_t P> struct formatter<mpfr::mp_float_t<P>, char, void> {
-  MPFR_CXX_CONSTEXPR formatter() = default;
-
-  static constexpr int zero = static_cast<mpfr_prec_t>(P) * 0;
-
-  using parse_context = typename ::mpfr::_::libfmt::
-      dependent_type<zero, fmt::basic_format_parse_context<char, detail::error_handler>>::type;
-  template <typename Out_Iter> using format_context = fmt::basic_format_context<Out_Iter, char>;
-
-  MPFR_CXX_CONSTEXPR auto parse(parse_context& ctx) -> typename parse_context::iterator {
-    return ::mpfr::_::libfmt::parse_mp_float_type_specs(specs, ctx);
-  }
-
-  using string_view = typename ::mpfr::_::libfmt::dependent_type<zero, ::fmt::string_view>::type;
-  using format_args = typename ::mpfr::_::libfmt::dependent_type<zero, ::fmt::format_args>::type;
-
-  template <typename Out_Iter>
-  auto format(mpfr::mp_float_t<P> const& value, format_context<Out_Iter>& ctx) ->
-      typename format_context<Out_Iter>::iterator {
+template <mpfr::precision_t P>
+struct formatter<mpfr::mp_float_t<P>, char, void> : ::mpfr::_::libfmt::base_parser {
+  template <typename Format_Context>
+  auto format(mpfr::mp_float_t<P> const& value, Format_Context& ctx) ->
+      typename Format_Context::iterator {
 
     using format_context_ref_t = ::mpfr::_::libfmt::format_context_ref_t<decltype(ctx.arg(int{}))>;
     {
       auto eh = ctx.error_handler();
-      mpfr::_::libfmt::parse_dynamic_args(specs, format_context_ref_t{&ctx}, {&eh});
+      ::mpfr::_::libfmt::parse_dynamic_args(specs, format_context_ref_t{&ctx}, {&eh});
     }
 
     constexpr std::size_t stack_bufsize =
-        mpfr::_::digits2_to_10(static_cast<std::size_t>(mpfr::mp_float_t<P>::precision) + 64);
+        ::mpfr::_::digits2_to_10(static_cast<std::size_t>(::mpfr::mp_float_t<P>::precision) + 64);
     char stack_buffer[stack_bufsize];
 
     auto out = ctx.out();
     ::mpfr::_::libfmt::format_impl(
-        mpfr::_::impl_access::mpfr_cref(value),
-        ::mpfr::_::libfmt::out_iter_ref_t<string_view, format_args>(&out),
+        ::mpfr::_::impl_access::mpfr_cref(value),
+        ::mpfr::_::libfmt::out_iter_ref_t(&out),
         stack_buffer,
         stack_bufsize,
-        specs);
+        ::mpfr::_::libfmt::base_parser::specs);
     return out;
   }
-
-  ::mpfr::_::libfmt::mp_float_specs specs;
 };
 
 } // namespace fmt

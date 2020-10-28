@@ -166,7 +166,7 @@ auto fma(mp_float_t<P> const& a, mp_float_t<P> const& b, mp_float_t<P> const& c)
   return out;
 }
 
-/// \return `true` if the argument is infinite, `false` otherwise.
+/// \return `true` if the argument is zero, `false` otherwise.
 template <precision_t P> auto iszero(mp_float_t<P> const& arg) noexcept -> bool {
   _::mpfr_cref_t x_ = _::impl_access::mpfr_cref(arg);
   return mpfr_zero_p(&x_.m) != 0;
