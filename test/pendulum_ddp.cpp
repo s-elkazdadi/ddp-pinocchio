@@ -9,10 +9,12 @@
 #include "ddp/pendulum_model.hpp"
 
 #include <fmt/ostream.h>
-#include "mpfr/mpfr.hpp"
+#include <boost/multiprecision/mpfr.hpp>
 
 #if 1
-using scalar_t = mpfr::mp_float_t<mpfr::digits10{1000}>;
+using scalar_t = boost::multiprecision::number<
+    boost::multiprecision::backends::mpfr_float_backend<500, boost::multiprecision::allocate_stack>,
+    boost::multiprecision::et_off>;
 #else
 using scalar_t = double;
 #endif
@@ -36,12 +38,12 @@ auto main() -> int {
       auto unfiltered = indexing::vec_regular_indexer(2, horizon + 2, dyn_index{m_target.size()});
       return {unfiltered, horizon, horizon + 1};
     }
-    auto operator[](index_t t) const -> vec_t const& {
+    auto operator[](index_t t) const -> eigen::view_t<vec_t const> {
       static const vec_t empty{};
       if (t != horizon) {
-        return empty;
+        return {nullptr, 0, 1, 0};
       }
-      return m_target;
+      return eigen::as_const_view(m_target);
     }
   };
   using dynamics_t = ddp::dynamics_t<model_t>;
@@ -67,8 +69,7 @@ auto main() -> int {
       horizon,
       1.0,
       dy,
-      constraint_advance_time(
-          constraint_advance_time(config_constraint_t<model_t, constraint_t>{dy, DDP_MOVE(eq_gen)})),
+      constraint_advance_time<2>(config_constraint_t<model_t, constraint_t>{dy, DDP_MOVE(eq_gen)}),
   };
   auto u_idx = indexing::vec_regular_indexer(0, horizon, nv);
   auto eq_idx = prob.m_constraint.eq_idx();

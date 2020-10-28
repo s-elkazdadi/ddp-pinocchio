@@ -34,8 +34,6 @@ struct zero_t {
   template <typename T> friend void operator/(T const&, zero_t  )   = delete;
                         friend void operator/(zero_t  , zero_t  )   = delete;
 
-  // template <typename T> friend auto operator+=(T const&, zero_t)   -> void {}
-  // template <typename T> friend auto operator-=(T const&, zero_t)   -> void {}
   // clang-format on
   auto hasNaN() const { return false; }
 };

@@ -343,7 +343,8 @@ struct spatial_constraint_t {
 
     bool computed = false;
     for (index_t i = 0; i < N_Frames; ++i) {
-      auto target = eigen::as_const_view(m_constraint_target_view(i, t));
+      auto _target = m_constraint_target_view(i, t);
+      auto target = eigen::as_const_view(_target);
       if (target.rows() == 0) {
         continue;
       }

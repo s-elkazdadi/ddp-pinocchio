@@ -12,6 +12,7 @@
 #include <new>
 #include <stdexcept>
 #include <atomic>
+#include <fmt/ostream.h>
 
 #if __cplusplus >= 201703L
 #define DDP_LAUNDER(...) ::std::launder(__VA_ARGS__)
@@ -380,6 +381,20 @@ auto model_t<T, Nq, Nv>::dynamics_aba( //
   ::pinocchio::aba(m_model->m_impl, data->m_impl, q, v, tau);
   out_acceleration = data->m_impl.ddq;
 
+  DDP_ASSERT_MSG(
+      fmt::format(
+          "invalid output acceleration:\n"
+          "{}\n"
+          "inputs are\n"
+          "q  : {}\n"
+          "v  : {}\n",
+          "tau: {}\n",
+          out_acceleration.transpose(),
+          q.transpose(),
+          v.transpose(),
+          tau.transpose()),
+      not out_acceleration.hasNaN());
+
   return k;
 }
 
@@ -428,6 +443,44 @@ auto model_t<T, Nq, Nv>::d_dynamics_aba(      //
       out_acceleration_dq,
       out_acceleration_dv,
       out_acceleration_dtau);
+
+  DDP_ASSERT_MSG_ALL_OF(
+      (fmt::format(
+           "invalid output derivative:\n"
+           "{}\n"
+           "inputs are\n"
+           "q  : {}\n"
+           "v  : {}\n",
+           "tau: {}\n",
+           out_acceleration_dq.transpose(),
+           q.transpose(),
+           v.transpose(),
+           tau.transpose()),
+       not out_acceleration_dq.hasNaN()),
+      (fmt::format(
+           "invalid output derivative:\n"
+           "{}\n"
+           "inputs are\n"
+           "q  : {}\n"
+           "v  : {}\n",
+           "tau: {}\n",
+           out_acceleration_dv.transpose(),
+           q.transpose(),
+           v.transpose(),
+           tau.transpose()),
+       not out_acceleration_dv.hasNaN()),
+      (fmt::format(
+           "invalid output derivative:\n"
+           "{}\n"
+           "inputs are\n"
+           "q  : {}\n"
+           "v  : {}\n",
+           "tau: {}\n",
+           out_acceleration_dtau.transpose(),
+           q.transpose(),
+           v.transpose(),
+           tau.transpose()),
+       not out_acceleration_dtau.hasNaN()));
 
   return k;
 }

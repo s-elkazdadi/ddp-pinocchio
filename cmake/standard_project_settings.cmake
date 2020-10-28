@@ -37,6 +37,7 @@ if(FULL_OPT)
   set(ARCH_NATIVE ON)
 endif()
 
+add_compile_options("-g")
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Debug' as none was specified.")
   set(CMAKE_BUILD_TYPE

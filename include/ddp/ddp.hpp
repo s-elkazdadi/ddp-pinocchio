@@ -719,7 +719,7 @@ struct ddp_solver_t {
                  fb_seq)) {
           DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
 
-          p_eq.val() += mu * (eq.val + eq.u * fb.val());
+          p_eq.val() += mu * eq.val;
           p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
         }
         return {
@@ -795,6 +795,9 @@ struct ddp_solver_t {
       trajectory_t                   initial_trajectory
   ) const -> detail::tuple<trajectory_t, control_feedback_t> {
     // clang-format on
+    std::string name = detail::to_owned(prob.name());
+    log_file_t traj_log{("/tmp/" + name + "_traj.dat").c_str()};
+
     auto derivatives = uninit_derivative_storage();
     auto& traj = initial_trajectory;
     auto new_traj = traj.clone();
@@ -805,8 +808,6 @@ struct ddp_solver_t {
 
     auto ctrl_fb = control_feedback_t{u_idx, prob};
 
-    prob.compute_derivatives(derivatives, traj);
-
     scalar_t mu = solver_parameters.mu_init;
 
     auto previous_opt_constr = optimality_constr(derivatives);
@@ -814,27 +815,46 @@ struct ddp_solver_t {
     scalar_t w = 1 / mu;
     scalar_t n = 1 / pow(mu, static_cast<scalar_t>(0.1L));
 
-    backward_pass<M>(ctrl_fb, reg, mu, traj, mults, derivatives);
+    auto print_traj = [&](index_t iter) {
+      fmt::print(traj_log.ptr, "{:4}: ", iter);
+      char const* outer_sep = "";
+      fmt::print(traj_log.ptr, "[");
+      for (auto xu : traj) {
+        auto x = xu.x();
 
-    scalar_t step = forward_pass<M>(new_traj, traj, mults, ctrl_fb, mu, true);
+        char const* inner_sep = "";
+        fmt::print(traj_log.ptr, "{}{}", outer_sep, "[");
+        for (index_t i = 0; i < x.size(); ++i) {
+          fmt::print(traj_log.ptr, "{}{}", inner_sep, x[i]);
+          inner_sep = ", ";
+        }
+        fmt::print(traj_log.ptr, "{}", "]");
+        outer_sep = ", ";
+      }
+      fmt::print(traj_log.ptr, "]\n");
+    };
+    print_traj(0);
 
     for (index_t iter = 0; iter < solver_parameters.max_iterations; ++iter) {
-      DDP_BIND(
-          auto,
-          (mult_update_rv, opt_obj, opt_constr),
-          (chronometer_t{"computing derivatives"},
-           update_derivatives<M>( //
-               derivatives,
-               ctrl_fb,
-               mults,
-               traj,
-               mu,
-               w,
-               n,
-               solver_parameters.optimality_stopping_threshold)));
-      (void)opt_obj;
 
-      {
+      if (iter == 0) {
+        prob.compute_derivatives(derivatives, traj);
+      } else {
+        DDP_BIND(
+            auto,
+            (mult_update_rv, opt_obj, opt_constr),
+            (chronometer_t{"computing derivatives"},
+             update_derivatives<M>( //
+                 derivatives,
+                 ctrl_fb,
+                 mults,
+                 traj,
+                 mu,
+                 w,
+                 n,
+                 solver_parameters.optimality_stopping_threshold)));
+        (void)opt_obj;
+
         scalar_t const beta = 0.5;
         chronometer_t c{"updating multipliers"};
         switch (mult_update_rv) {
@@ -878,17 +898,17 @@ struct ddp_solver_t {
           n);
 
       {
-        chronometer_t c{"forward_pass"};
-        step = forward_pass<M>(new_traj, traj, mults, ctrl_fb, mu, true);
-      }
-      if (step >= 0.5) {
-        reg.decrease_reg();
-      }
+        scalar_t step = (chronometer_t{"forward_pass"}, forward_pass<M>(new_traj, traj, mults, ctrl_fb, mu, true));
+        if (step >= 0.5) {
+          reg.decrease_reg();
+        }
 
-      swap(traj, new_traj);
+        swap(traj, new_traj);
 
-      fmt::print(stdout, "step: {}\n", step);
-      fmt::print(stdout, "eq: ");
+        print_traj(iter + 1);
+        fmt::print(stdout, "step: {}\n", step);
+        fmt::print(stdout, "eq: ");
+      }
 
       fmt::string_view sep = "";
       for (auto eq : derivatives.eq()) {

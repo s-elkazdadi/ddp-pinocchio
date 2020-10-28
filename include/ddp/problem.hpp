@@ -825,8 +825,9 @@ struct multiple_shooting_t {
 };
 
 template <typename Problem, typename Slack_Idx>
-auto multi_shooting(Problem p, Slack_Idx idx) -> multiple_shooting_t<Problem, Slack_Idx> {
-  return {DDP_MOVE(p), DDP_MOVE(idx)};
+auto multi_shooting(Problem p, Slack_Idx idx, typename Problem::scalar_t factor = 1)
+    -> multiple_shooting_t<Problem, Slack_Idx> {
+  return {DDP_MOVE(p), DDP_MOVE(idx), factor};
 }
 
 } // namespace ddp

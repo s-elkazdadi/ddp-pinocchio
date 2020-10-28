@@ -9,10 +9,12 @@
 #include "ddp/pendulum_model.hpp"
 
 #include <fmt/ostream.h>
-#include "mpfr/mpfr.hpp"
+#include <boost/multiprecision/mpfr.hpp>
 
-#if 1
-using scalar_t = mpfr::mp_float_t<mpfr::digits10{1000}>;
+#if 0
+using scalar_t = boost::multiprecision::number<
+    boost::multiprecision::backends::mpfr_float_backend<500, boost::multiprecision::allocate_stack>,
+    boost::multiprecision::et_off>;
 #else
 using scalar_t = double;
 #endif
@@ -30,17 +32,63 @@ auto main() -> int {
       omp_get_num_procs()};
   auto nq = model.configuration_dim_c();
   auto nv = model.tangent_dim_c();
-  constexpr static index_t horizon = 10;
+  constexpr static index_t horizon = 200;
 
-  struct {
-    vec_t m_target;
-    auto eq_idx() const DDP_DECLTYPE_AUTO(indexing::vec_regular_indexer(2, horizon + 2, dyn_index{m_target.size()}));
-    auto operator[](index_t) const -> vec_t const& { return m_target; }
-  } eq_gen = {[&] {
+  for (index_t i = 0; i < model.n_frames(); ++i) {
+    fmt::print("{}\n", model.frame_name(i));
+  }
+
+  auto make_config = [&](std::initializer_list<scalar_t> values) {
     auto q = eigen::make_matrix<scalar_t>(nq, fix_index<1>{});
     model.neutral_configuration(eigen::as_mut_view(q));
+    for (index_t i = 0; i < model.configuration_dim(); ++i) {
+      q[i] = *(values.begin() + i);
+    }
     return q;
-  }()};
+  };
+
+  using filter_t = indexing::range_row_filter_t<indexing::regular_indexer_t<dyn_index>>;
+
+  struct {
+    model_t const& model;
+    index_t m_ts[4];
+    vec_t m_targets[3];
+    auto eq_idx() const {
+      auto range_idx = [&](index_t s, index_t f) {
+        return filter_t{indexing::vec_regular_indexer(2, horizon + 2, model.configuration_dim_c()), s, f};
+      };
+      return row_concat(
+          row_concat(range_idx(m_ts[0], m_ts[0] + 1), range_idx(m_ts[1], m_ts[1] + 1)),
+          range_idx(m_ts[2], m_ts[3]));
+    };
+    auto operator[](index_t t) const -> eigen::view_t<vec_t const> {
+      if (t == m_ts[0]) {
+        return eigen::as_const_view(m_targets[0]);
+      }
+      if (t == m_ts[1]) {
+        return eigen::as_const_view(m_targets[1]);
+      }
+      if (t >= m_ts[2] and t < m_ts[3]) {
+        return eigen::as_const_view(m_targets[2]);
+      }
+      return {nullptr, 0, 1};
+    }
+  } eq_gen = {
+      model,
+      {horizon / 4, horizon / 4 * 2, horizon / 4 * 3, horizon + 2},
+      {
+          make_config({1.8, -0.78, 0, 0, 0, 1}),
+          make_config({0, -0.78, 0, 0, 0, 1}),
+          make_config({0.0, -1.57, 0.0, 0.0, 0.0, 0.0}),
+      }};
+
+  for (auto& target : eq_gen.m_targets) {
+    vec_t out{3};
+    model.frame_coordinates_precompute(eigen::as_const_view(target), model.acquire_workspace());
+    model.frame_coordinates(eigen::into_view(eigen::as_mut_view(out)), 18, model.acquire_workspace());
+    fmt::print("{}\n", out.transpose());
+  }
+  std::terminate();
 
   auto x_init = [&] {
     auto x = eigen::make_matrix<scalar_t>(nq + nv, fix_index<1>{});
@@ -77,7 +125,7 @@ auto main() -> int {
   {
     using std::pow;
 
-    constexpr auto M = method::primal_dual_constant_multipliers;
+    constexpr auto M = method::primal_dual_affine_multipliers;
 
     auto derivs = solver.uninit_derivative_storage();
 
