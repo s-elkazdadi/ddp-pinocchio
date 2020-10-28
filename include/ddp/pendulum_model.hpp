@@ -2,7 +2,7 @@
 #define PENDULUM_MODEL_HPP_J49J0ZTO
 
 #include "ddp/indexer.hpp"
-#include <memory>
+#include <cmath>
 #include <random>
 
 namespace ddp {
@@ -17,9 +17,6 @@ struct pendulum_model_t {
 private:
   using mut_view_t = eigen::view_t<Eigen::Matrix<scalar_t, 1, 1>>;
   using const_view_t = eigen::view_t<Eigen::Matrix<scalar_t, 1, 1> const>;
-
-  using row_major_mut_view_t = eigen::view_t<Eigen::Matrix<scalar_t, 1, 1, Eigen::RowMajor>>;
-  using row_major_const_view_t = eigen::view_t<Eigen::Matrix<scalar_t, 1, 1, Eigen::RowMajor> const>;
 
   scalar_t m_mass;
   scalar_t m_length;

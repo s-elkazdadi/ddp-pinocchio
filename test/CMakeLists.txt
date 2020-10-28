@@ -64,13 +64,15 @@ add_executable(test_pinocchio_ddp pinocchio_ddp.cpp)
 target_link_libraries(test_pinocchio_ddp PUBLIC ${testlibs} pinocchio_impl)
 
 add_executable(test_pinocchio_spatial_eq_ddp pinocchio_spatial_eq_ddp.cpp)
-target_link_libraries(test_pinocchio_spatial_eq_ddp PUBLIC ${testlibs} pinocchio_impl)
+target_link_libraries(
+  test_pinocchio_spatial_eq_ddp PUBLIC ${testlibs} pinocchio_impl
+)
 
 add_executable(test_pendulum_ddp pendulum_ddp.cpp)
 target_link_libraries(test_pendulum_ddp PUBLIC ddp)
 
-add_executable(test_pinocchio_jac pinocchio_jac.cpp)
-target_link_libraries(test_pinocchio_jac PUBLIC ${testlibs})
+add_executable(test_cart_ddp cart_ddp.cpp)
+target_link_libraries(test_cart_ddp PUBLIC ddp)
 
 doctest_discover_tests(test_indexing)
 doctest_discover_tests(test_mat_seq)

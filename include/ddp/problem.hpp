@@ -346,11 +346,11 @@ void compute_derivatives(
 
         for (index_t i = 0; i < df1.size(); ++i) {
           DDP_EXPECT_MSG_ALL_OF(
-              (fmt::format("at t = {}\n{}\n{}", t, df1[i], df2[i]),
+              (fmt::format("at t = {}, i = {}\n{}\n{}", t, i, df1[i], df2[i]),
                (fabs(df1[i]) <= eps or fabs(df2[i]) <= 2 * eps_factor * fabs(df1[i]))),
-              (fmt::format("at t = {}\n{}\n{}", t, ddf1[i], ddf2[i]),
+              (fmt::format("at t = {}, i = {}\n{}\n{}", t, i, ddf1[i], ddf2[i]),
                (fabs(ddf1[i]) <= eps or fabs(ddf2[i]) <= 2 * pow(eps_factor, 2) * fabs(ddf1[i]))),
-              (fmt::format("at t = {}\n{}\n{}", t, dddf1[i], dddf2[i]),
+              (fmt::format("at t = {}, i = {}\n{}\n{}", t, i, dddf1[i], dddf2[i]),
                (fabs(dddf1[i]) <= eps or fabs(dddf2[i]) <= 2 * pow(eps_factor, 3) * fabs(dddf1[i]))));
         }
 
