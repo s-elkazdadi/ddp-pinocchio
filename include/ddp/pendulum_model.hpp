@@ -2,6 +2,7 @@
 #define PENDULUM_MODEL_HPP_J49J0ZTO
 
 #include "ddp/indexer.hpp"
+#include "ddp/detail/eigen.hpp"
 #include <cmath>
 #include <random>
 

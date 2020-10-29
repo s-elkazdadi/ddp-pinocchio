@@ -2,6 +2,7 @@
 #define TENSOR_HPP_PTZWQRYY
 
 #include "ddp/indexer.hpp"
+#include "ddp/detail/eigen.hpp"
 #include <functional>
 #include <memory>
 

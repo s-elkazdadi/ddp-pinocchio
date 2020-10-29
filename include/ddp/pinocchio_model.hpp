@@ -2,6 +2,7 @@
 #define PINOCCHIO_INTERFACE_HPP_EVURJTS1
 
 #include "ddp/indexer.hpp"
+#include "ddp/detail/eigen.hpp"
 #include <memory>
 
 namespace ddp {

@@ -2,6 +2,7 @@
 #define MAT_SEQ_HPP_Y36FNCPW
 
 #include "ddp/indexer.hpp"
+#include "eigen.hpp"
 
 namespace ddp {
 namespace detail {

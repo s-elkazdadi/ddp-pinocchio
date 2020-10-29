@@ -2,6 +2,7 @@
 #define CART_MODEL_HPP_XBXDUEUC
 
 #include "ddp/indexer.hpp"
+#include "ddp/dynamics.hpp"
 #include <cmath>
 #include <random>
 
@@ -166,8 +167,104 @@ public:
     return k;
   }
 
-  auto model_name() const -> fmt::string_view { return "pendulum"; }
+  auto model_name() const -> fmt::string_view { return "cartpole"; }
 };
+
+template <typename Model, typename Constraint_Target_View>
+struct config_single_coord_constraint_t {
+  using scalar_t = typename Model::scalar_t;
+  using model_t = Model;
+  using dynamics_t = ddp::dynamics_t<model_t>;
+
+  using constr_indexer_t = decltype(std::declval<Constraint_Target_View const&>().eq_idx());
+
+  using dims = dimensions_from_idx_t<
+      scalar_t,
+      typename dynamics_t::state_indexer_t,
+      typename dynamics_t::dstate_indexer_t,
+      typename dynamics_t::control_indexer_t,
+      typename dynamics_t::dcontrol_indexer_t,
+      constr_indexer_t,
+      constr_indexer_t>;
+
+  using key = typename dynamics_t::key;
+
+  auto eq_idx() const -> constr_indexer_t { return m_constraint_target_view.eq_idx(); }
+  auto eq_dim(index_t t) const -> typename constr_indexer_t::row_kind { return eq_idx().rows(t); }
+
+  void integrate_x(x_mut<dims> out, x_const<dims> x, dx_const<dims> dx) const { m_dynamics.integrate_x(out, x, dx); }
+  void integrate_u(u_mut<dims> out, index_t t, u_const<dims> u, u_const<dims> du) const {
+    m_dynamics.integrate_u(out, t, u, du);
+  }
+  template <typename Out, typename In>
+  void difference_out(Out out, In start, In finish) const {
+    DDP_DEBUG_ASSERT_MSG_ALL_OF(          //
+        ("", out.rows() == start.rows()), //
+        ("", out.rows() == finish.rows()));
+    out = finish - start;
+  }
+
+  auto eval_to(out_mut<dims> out, index_t t, x_const<dims> x, u_const<dims> u, key k) const -> key {
+    auto target = eigen::as_const_view(m_constraint_target_view[t]);
+    if (target.rows() == 0) {
+      return k;
+    }
+    (void)u;
+
+    out[0] = x[i] - target[i];
+    return k;
+  }
+
+  auto first_order_deriv(    //
+      out_x_mut<dims> out_x, //
+      out_u_mut<dims> out_u, //
+      out_mut<dims> out,     //
+      index_t t,             //
+      x_const<dims> x,       //
+      u_const<dims> u,       //
+      key k                  //
+  ) const -> key {
+    (void)u;
+    auto target = eigen::as_const_view(m_constraint_target_view[t]);
+    if (target.rows() == 0) {
+      return k;
+    }
+
+    out[0] = x[i] - target[i];
+    out_x.setZero();
+    out_x(0, i) = 1;
+    out_u.setZero();
+    return k;
+  }
+
+  auto second_order_deriv(     //
+      out_xx_mut<dims> out_xx, //
+      out_ux_mut<dims> out_ux, //
+      out_uu_mut<dims> out_uu, //
+      out_x_mut<dims> out_x,   //
+      out_u_mut<dims> out_u,   //
+      out_mut<dims> out,       //
+      index_t t,               //
+      x_const<dims> x,         //
+      u_const<dims> u,         //
+      key k                    //
+  ) const -> key {
+    return finite_diff_hessian_compute<config_single_coord_constraint_t>{*this, m_dynamics.second_order_finite_diff()}
+        .second_order_deriv(out_xx, out_ux, out_uu, out_x, out_u, out, t, x, u, DDP_MOVE(k));
+  }
+
+  auto dynamics() const -> dynamics_t const& { return m_dynamics; }
+
+  dynamics_t m_dynamics;
+  Constraint_Target_View m_constraint_target_view;
+  index_t i;
+};
+
+template <typename Dynamics, typename Constraint_Target_View>
+auto config_single_coord_constraint(Dynamics d, Constraint_Target_View v, index_t i)
+    -> config_single_coord_constraint_t<typename Dynamics::model_t, Constraint_Target_View> {
+  return {DDP_MOVE(d), DDP_MOVE(v), i};
+}
 
 } // namespace ddp
 

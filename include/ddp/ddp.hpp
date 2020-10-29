@@ -651,9 +651,9 @@ struct ddp_solver_t {
 
       adj = adj * f.x;
       adj += l.x;
-      adj += mu * eq.val.transpose() * eq.x;
-      adj += pe.transpose() * eq.x;
-      adj += eq.val.transpose() * p_eq.jac();
+      adj.noalias() += mu * eq.val.transpose() * eq.x;
+      adj.noalias() += pe.transpose() * eq.x;
+      adj.noalias() += eq.val.transpose() * p_eq.jac();
     }
     return retval;
   }
@@ -680,13 +680,13 @@ struct ddp_solver_t {
       scalar_t const& w,
       scalar_t const& n,
       scalar_t const& stopping_threshold) const -> detail::tuple<mult_update_attempt_result_e, scalar_t, scalar_t> {
-    std::string name = detail::to_owned(prob.name());
-    log_file_t primal_log{((M == method::primal_dual_affine_multipliers //
-                                ? "/tmp/affine_mults_"
-                                : "/tmp/") +
-                           name + "_primal.dat")
-                              .c_str()};
-    log_file_t dual_log{("/tmp/" + DDP_MOVE(name) + "_dual.dat").c_str()};
+    std::string name = (M == method::primal_dual_affine_multipliers //
+                            ? "/tmp/affine_mults_"
+                            : "/tmp/") +
+                       detail::to_owned(prob.name());
+    log_file_t primal_log{(name + "_primal.dat").c_str()};
+    log_file_t dual_log{(name + "_dual.dat").c_str()};
+    log_file_t mu_log{(name + "_mu.dat").c_str()};
 
     prob.compute_derivatives(derivatives, traj);
 
@@ -698,6 +698,7 @@ struct ddp_solver_t {
 
     fmt::print(primal_log.ptr, "{}\n", opt_constr);
     fmt::print(dual_log.ptr, "{}\n", opt_obj);
+    fmt::print(mu_log.ptr, "{}\n", mu);
 
     fmt::print(
         stdout,
@@ -723,8 +724,10 @@ struct ddp_solver_t {
                  fb_seq)) {
           DDP_BIND(auto&&, (p_eq, eq, fb), zipped);
 
-          p_eq.val() += mu * (eq.val + eq.u * fb.val());
-          p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
+          if (eq.val.size() > 0) {
+            p_eq.jac() += mu * (eq.x + eq.u * fb.jac());
+            p_eq.val() += mu * eq.val;
+          }
         }
         return {
             mult_update_attempt_result_e::update_success,
@@ -790,7 +793,7 @@ struct ddp_solver_t {
   ddp_solver_t(ddp_solver_t const&) = delete;
   ddp_solver_t(ddp_solver_t&&) = delete;
   auto operator=(ddp_solver_t const&) -> ddp_solver_t& = delete;
-  auto operator=(ddp_solver_t &&) -> ddp_solver_t& = delete;
+  auto operator=(ddp_solver_t&&) -> ddp_solver_t& = delete;
 
   // clang-format off
   template <method M>
@@ -859,12 +862,13 @@ struct ddp_solver_t {
                             pow(mu / (previous_opt_constr / opt_constr), 1.0 / (1 - beta)),
                             mu * scalar_t{1e5}),
                         mu);
+          if (iter > 40) mu = 1e15;
           break;
         }
         case mult_update_attempt_result_e::update_success: {
           using std::pow;
           n = opt_constr / pow(mu, beta / 2);
-          w /= pow(mu, scalar_t{1});
+          w = std::max(w / pow(mu, scalar_t{1}), n / mu);
           previous_opt_constr = opt_constr;
           break;
         }

@@ -2,7 +2,6 @@
 #define DDP_IMPL_HPP_UBVAKU5V
 
 #include "ddp/ddp.hpp"
-#include <Eigen/Cholesky>
 
 namespace ddp {
 
@@ -25,8 +24,8 @@ void ddp_solver_t<Problem>::
   // TODO preallocate V_{x,xx}, Q_{x,u,xx,ux,uu}
   while (not success) {
     auto V_xx = derivatives.lfxx.eval();
-    auto V_x = derivatives.lfx.transpose().eval();
-    auto const v_x = eigen::as_const_view(V_x);
+    auto V_x = derivatives.lfx.eval();
+    auto const v_x = eigen::as_const_view(V_x.transpose());
 
     scalar_t expected_decrease = 0;
 
@@ -59,17 +58,17 @@ void ddp_solver_t<Problem>::
       }
 
       // clang-format off
-      auto Q_x         = l.x.transpose().eval();                  auto Q_x_v = eigen::as_mut_view(Q_x);
-      Q_x_v.noalias() += f.x.transpose() * V_x;
+      auto Q_x         = l.x.eval();                  auto Q_x_v = eigen::as_mut_view(Q_x);
+      Q_x_v.noalias() += V_x * f.x;
       if (has_eq) {
-        Q_x_v.noalias() += eq.x.transpose() * tmp;
-        Q_x_v.noalias() += pe_x.transpose() * eq.val;
+        Q_x_v.noalias() += tmp.transpose() * eq.x;
+        Q_x_v.noalias() += eq.val.transpose() * pe_x;
       }
 
-      auto Q_u         = l.u.transpose().eval();                  auto Q_u_v = eigen::as_mut_view(Q_u);
-      Q_u_v.noalias() += f.u.transpose() * V_x;
+      auto Q_u         = l.u.eval();                  auto Q_u_v = eigen::as_mut_view(Q_u);
+      Q_u_v.noalias() += V_x * f.u;
       if (has_eq) {
-        Q_u_v.noalias() += eq.u.transpose() * tmp;
+        Q_u_v.noalias() += tmp.transpose() * eq.u;
       }
 
       auto Q_xx         = l.xx.eval();                            auto Q_xx_v = eigen::as_mut_view(Q_xx);
@@ -112,15 +111,31 @@ void ddp_solver_t<Problem>::
 
       auto I_u = decltype(Q_uu)::Identity(Q_uu.rows(), Q_uu.rows());
 
-      auto const fact = ((Q_uu + *regularization * I_u).eval()).llt();
-      if (fact.info() == Eigen::NumericalIssue) {
+      auto Q_uu_llt = Q_uu;
+      Q_uu_llt += *regularization * I_u;
+      auto llt_res = eigen::llt_inplace(Q_uu_llt);
+
+      if (not llt_res.success()) {
         regularization.increase_reg();
         break;
       }
 
-      u_fb.origin() = xu.x();
-      u_fb.val() = fact.solve(-Q_u);
-      u_fb.jac() = fact.solve(-Q_ux);
+      {
+        Eigen::Map<Eigen::Matrix<
+            scalar_t,
+            decltype(Q_u)::ColsAtCompileTime,
+            1,
+            Eigen::ColMajor,
+            decltype(Q_u)::MaxColsAtCompileTime,
+            1>>
+            q_u_t{Q_u.data(), Q_u.cols()};
+
+        u_fb.origin() = xu.x();
+        eigen::llt_solve(u_fb.val(), llt_res, q_u_t);
+        eigen::llt_solve(u_fb.jac(), llt_res, Q_ux);
+        u_fb.val() *= -1;
+        u_fb.jac() *= -1;
+      }
 
       auto const k = u_fb.val();
       auto const K = u_fb.jac();
@@ -129,7 +144,7 @@ void ddp_solver_t<Problem>::
 
       // clang-format off
       V_x            = Q_x;
-      V_x.noalias() += Q_ux.transpose() * k;
+      V_x.noalias() += k.transpose() * Q_ux;
 
       V_xx            = Q_xx;
       V_xx.noalias() += Q_ux.transpose() * K;
