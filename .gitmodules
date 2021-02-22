@@ -1,0 +1,6 @@
+[submodule "external/mpfr-cxx"]
+	path = external/mpfr-cxx
+	url = https://github.com/kitegi/mpfr-cxx.git
+[submodule "external/veg"]
+	path = external/veg
+	url = https://github.com/kitegi/veg.git
