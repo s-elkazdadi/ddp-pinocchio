@@ -76,7 +76,7 @@ void ddp_solver_t<Problem>::
       if (has_eq) {
         Q_xx_v.noalias() += eq.x.transpose() * tmp2;
         Q_xx_v.noalias() += pe_x.transpose() * eq.x;
-        eq.xx.noalias_contract_add_outdim(Q_xx_v, tmp);
+        eq.xx.noalias_contract_add_outdim((Q_xx_v), tmp);
       }
       f .xx.noalias_contract_add_outdim(Q_xx_v, v_x);
 
@@ -84,17 +84,17 @@ void ddp_solver_t<Problem>::
       Q_uu_v.noalias() += f.u.transpose() * V_xx * f.u;
       if (has_eq) {
         Q_uu_v.noalias() +=  (eq.u.transpose() * eq.u).operator*(mu); // *see below for reason
-        eq.uu.noalias_contract_add_outdim(Q_uu_v, tmp);
+        eq.uu.noalias_contract_add_outdim(eigen::into_view(Q_uu_v), tmp);
       }
-      f .uu.noalias_contract_add_outdim(Q_uu_v, v_x);
+      f .uu.noalias_contract_add_outdim(eigen::into_view(Q_uu_v), v_x);
 
       auto Q_ux         = l.ux.eval();                            auto Q_ux_v = eigen::as_mut_view(Q_ux);
       Q_ux_v.noalias() += f.u.transpose() * V_xx * f.x;
       if (has_eq) {
         Q_ux_v.noalias() +=  eq.u.transpose() * tmp2;
-        eq.ux.noalias_contract_add_outdim(Q_ux_v, tmp);
+        eq.ux.noalias_contract_add_outdim(eigen::into_view(Q_ux_v), tmp);
       }
-      f .ux.noalias_contract_add_outdim(Q_ux_v, v_x);
+      f .ux.noalias_contract_add_outdim(eigen::into_view(Q_ux_v), v_x);
       // clang-format on
 
       /*

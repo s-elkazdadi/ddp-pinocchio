@@ -55,8 +55,7 @@ set(CONAN_REQUIRES
     # Mozilla Public License 2.0
     eigen/3.3.7
     #
-    # New (Revised) BSD License
-    # LGPL v3.0
+    # New (Revised) BSD License LGPL v3.0
     mpfr/4.1.0
 )
 target_compile_definitions(
@@ -82,6 +81,13 @@ pkg_check_modules(
   pinocchio
 )
 
+pkg_check_modules(
+  hpp-fcl
+  REQUIRED
+  IMPORTED_TARGET
+  hpp-fcl
+)
+
 add_library(ddp src/lib.cpp)
 target_link_libraries(
   ddp
@@ -97,6 +103,7 @@ target_link_libraries(
          CONAN_PKG::eigen
          CONAN_PKG::mpfr
          PkgConfig::urdfdom
+         PkgConfig::hpp-fcl
          PkgConfig::pinocchio
          OpenMP::OpenMP_CXX
 )

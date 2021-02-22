@@ -28,7 +28,7 @@ auto main() -> int {
 
   using model_t = pinocchio::model_t<scalar_t>;
   auto model = model_t{
-      fmt::string_view{"~/pinocchio/models/others/robots/ur_description/urdf/ur5_gripper.urdf"},
+      fmt::string_view{EXAMPLE_ROBOT_DATA_MODEL_DIR "/ur_description/urdf/ur5_gripper.urdf"},
       omp_get_num_procs()};
   auto nq = model.configuration_dim_c();
   auto nv = model.tangent_dim_c();
@@ -60,6 +60,7 @@ auto main() -> int {
       return row_concat(
           row_concat(range_idx(m_ts[0], m_ts[0] + 1), range_idx(m_ts[1], m_ts[1] + 1)),
           range_idx(m_ts[2], m_ts[3]));
+      // return range_idx(m_ts[2], m_ts[3]);
     };
     auto operator[](index_t t) const -> eigen::view_t<vec_t const> {
       if (t == m_ts[0]) {
@@ -71,7 +72,7 @@ auto main() -> int {
       if (t >= m_ts[2] and t < m_ts[3]) {
         return eigen::as_const_view(m_targets[2]);
       }
-      return {nullptr, 0, 1};
+      return {nullptr, 0, 1, 0};
     }
   } eq_gen = {
       model,
@@ -88,7 +89,6 @@ auto main() -> int {
     model.frame_coordinates(eigen::into_view(eigen::as_mut_view(out)), 18, model.acquire_workspace());
     fmt::print("{}\n", out.transpose());
   }
-  std::terminate();
 
   auto x_init = [&] {
     auto x = eigen::make_matrix<scalar_t>(nq + nv, fix_index<1>{});
@@ -100,11 +100,14 @@ auto main() -> int {
   }();
 
   auto dy = pinocchio_dynamics(model, 0.01, false);
-  auto prob = problem(0, horizon, 1.0, dy, constraint_advance_time<2>(config_constraint(dy, DDP_MOVE(eq_gen))));
+  auto _prob = problem(0, horizon, 1.0, dy, constraint_advance_time<2>(config_constraint(dy, DDP_MOVE(eq_gen))));
+  auto prob = _prob;
+  // auto prob = multi_shooting(_prob, indexing::periodic_row_filter(_prob.state_indexer(0, horizon), 3, 1), 1e0);
   using problem_t = decltype(prob);
 
   auto u_idx = indexing::vec_regular_indexer(0, horizon, nv);
-  auto eq_idx = prob.m_constraint.eq_idx();
+  // auto u_idx = row_concat(indexing::vec_regular_indexer(0, horizon, nv), prob.m_slack_idx);
+  auto eq_idx = prob.constraint().eq_idx();
 
   struct control_generator_t {
     using u_mat_t = eigen::matrix_from_idx_t<scalar_t, problem_t::control_indexer_t>;
@@ -117,6 +120,7 @@ auto main() -> int {
     void next(eigen::view_t<x_mat_t const>) {
       ++m_current_index;
       m_value.resize(m_u_idx.rows(m_current_index).value());
+      m_value.setZero();
     }
   };
 
@@ -130,7 +134,7 @@ auto main() -> int {
     auto derivs = solver.uninit_derivative_storage();
 
     scalar_t const mu_init = 1e2;
-    auto res = solver.solve<M>({200, 1e-80, mu_init}, solver.make_trajectory(control_generator_t{u_idx}));
+    auto res = solver.solve<M>({1000, 1e-80, mu_init}, solver.make_trajectory(control_generator_t{u_idx}));
     DDP_BIND(auto&&, (traj, fb), res);
     (void)fb;
 

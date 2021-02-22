@@ -1,0 +1,6 @@
+[submodule "ext/fancy-assert"]
+	path = ext/fancy-assert
+	url = https://github.com/kitegi/fancy-assert
+[submodule "ext/mpfr-cxx"]
+	path = ext/mpfr-cxx
+	url = https://github.com/kitegi/mpfr-cxx

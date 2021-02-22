@@ -42,20 +42,22 @@ public:
   auto horizon() const -> index_t { return m_state_data.idx.n_steps - 1; }
 
   auto println_to_file(std::FILE* out) const {
-    char const* outer_sep = "";
     fmt::print(out, "[");
+
+    auto print_x = [&](auto x) {
+      fmt::print(out, "[");
+      for (index_t i = 0; i < x.size(); ++i) {
+        fmt::print(out, "{},", x[i]);
+      }
+      fmt::print(out, "],");
+    };
+
     for (auto xu : *this) {
       auto x = xu.x();
-
-      char const* inner_sep = "";
-      fmt::print(out, "{}{}", outer_sep, "[");
-      for (index_t i = 0; i < x.size(); ++i) {
-        fmt::print(out, "{}{}", inner_sep, x[i]);
-        inner_sep = ", ";
-      }
-      fmt::print(out, "{}", "]");
-      outer_sep = ", ";
+      print_x(x);
     }
+    auto x = x_f();
+    print_x(x);
     fmt::print(out, "]\n");
   }
 

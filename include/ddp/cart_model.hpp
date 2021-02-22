@@ -23,7 +23,7 @@ private:
   scalar_t M;
   scalar_t m;
   scalar_t l;
-  static constexpr long double g = 9.81L;
+  static constexpr double g = 9.81;
 
 public:
   struct key {

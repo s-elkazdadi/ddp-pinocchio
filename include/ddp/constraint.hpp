@@ -454,8 +454,8 @@ struct config_constraint_t {
     (void)u;
     auto nq = m_dynamics.m_model.configuration_dim_c();
 
-    difference_out(
-        out,
+    m_dynamics.m_model.difference(
+        eigen::into_view(out),
         detail::get<0>(eigen::split_at_row(target, nq)),
         detail::get<0>(eigen::split_at_row(x, nq)) // configuration part of x_nn
     );
@@ -483,8 +483,8 @@ struct config_constraint_t {
     auto nq = m_model.configuration_dim_c();
     auto nv = m_model.tangent_dim_c();
 
-    difference_out(
-        out,
+    m_dynamics.m_model.difference(
+        eigen::into_view(out),
         detail::get<0>(eigen::split_at_row(target, nq)),
         detail::get<0>(eigen::split_at_row(x, nq)) // configuration part of x_nn
     );

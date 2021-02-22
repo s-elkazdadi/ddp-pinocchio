@@ -244,7 +244,11 @@ void compute_derivatives(
           auto u_ = u.eval();
 
           prob.dynamics().integrate_x(eigen::as_mut_view(x_), eigen::as_const_view(x), eigen::as_const_view(dx));
-          prob.dynamics().integrate_u(eigen::as_mut_view(u_), t, eigen::as_const_view(u), eigen::as_const_view(du));
+          prob.dynamics().integrate_u(
+              eigen::as_mut_view(u_),
+              t,
+              eigen::as_const_view(u),
+              eigen::into_view(eigen::as_const_view(du)));
 
           l = prob.l(t, x, u);
           k = prob.eval_f_to(eigen::as_mut_view(f), t, x, u, DDP_MOVE(k));

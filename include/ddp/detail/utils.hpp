@@ -22,6 +22,8 @@
 
 #include <Eigen/Core>
 #include <fmt/core.h>
+#include <gsl-lite/gsl-lite.hpp>
+#include "fancy-assert/fancy_assert.hpp"
 
 #define DDP_DECLVAL(...) static_cast<__VA_ARGS__ (*)()>(nullptr)()
 #define DDP_SIZEOF(...) static_cast<::ddp::index_t>(sizeof(__VA_ARGS__))
@@ -37,8 +39,6 @@
     BOOST_PP_REMOVE_PARENS Precondition_Block return __VA_ARGS__;                                                      \
   }                                                                                                                    \
   static_assert(true, "")
-
-#include "ddp/detail/assertions.hpp"
 
 /**********************************************************************************************************************/
 #define DDP_IMPL_BIND(r, Tuple, Index, Identifier) auto&& Identifier = ::ddp::detail::adl_get<Index>(Tuple);
@@ -62,15 +62,7 @@
       BOOST_PP_CAT(_dummy_tuple_variable_id_, __LINE__))
 /**********************************************************************************************************************/
 
-namespace gsl {
-template <typename T>
-using owner = T;
-} // namespace gsl
-
 namespace ddp {
-
-[[noreturn]] void fast_fail(fmt::string_view message);
-void print_msg(fmt::string_view message);
 
 struct log_file_t {
   std::FILE* ptr;

@@ -25,24 +25,9 @@ add_library(ddp_impl INTERFACE)
 target_link_libraries(ddp_impl INTERFACE eigen_impl)
 
 macro(pinocchio_codegen Scalar)
-  add_library(pinocchio_general_${Scalar} src/pinocchio_${Scalar}.cpp)
-  add_library(pinocchio_aba_${Scalar} src/pinocchio_${Scalar}.cpp)
-  add_library(pinocchio_frames_${Scalar} src/pinocchio_${Scalar}.cpp)
-  target_link_libraries(pinocchio_general_${Scalar} PUBLIC ddp)
-  target_link_libraries(pinocchio_aba_${Scalar} PUBLIC ddp)
-  target_link_libraries(pinocchio_frames_${Scalar} PUBLIC ddp)
-  target_compile_definitions(
-    pinocchio_general_${Scalar} PUBLIC DDP_PINOCCHIO_GENERAL
-  )
-  target_compile_definitions(pinocchio_aba_${Scalar} PUBLIC DDP_PINOCCHIO_ABA)
-  target_compile_definitions(
-    pinocchio_frames_${Scalar} PUBLIC DDP_PINOCCHIO_FRAMES
-  )
-  target_link_libraries(
-    pinocchio_impl INTERFACE pinocchio_general_${Scalar}
-                             pinocchio_aba_${Scalar} pinocchio_frames_${Scalar}
-  )
-
+  add_library(pinocchio_${Scalar} src/pinocchio_${Scalar}.cpp)
+  target_link_libraries(pinocchio_${Scalar} PUBLIC ddp)
+  target_link_libraries(pinocchio_impl INTERFACE pinocchio_${Scalar})
 endmacro()
 
 macro(eigen_codegen Scalar)
@@ -64,6 +49,9 @@ add_executable(test_pinocchio_ddp pinocchio_ddp.cpp)
 target_link_libraries(
   test_pinocchio_ddp PUBLIC ${testlibs} ddp_impl pinocchio_impl
 )
+
+add_executable(test_two_arms two_arms.cpp)
+target_link_libraries(test_two_arms PUBLIC ${testlibs} ddp_impl pinocchio_impl)
 
 add_executable(test_pinocchio_spatial_eq_ddp pinocchio_spatial_eq_ddp.cpp)
 target_link_libraries(

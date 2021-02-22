@@ -55,6 +55,7 @@ auto ddp_solver_t<Problem>::
       cost_seq_aug(eigen::as_mut_view(costs_new_traj), new_traj_storage, old_mults, mu);
 
       if ((costs_new_traj - costs_old_traj).sum() <= 0) {
+        fmt::print("{} {}\n", costs_new_traj.sum(), costs_old_traj.sum());
         success = true;
       } else {
         step *= 0.5;

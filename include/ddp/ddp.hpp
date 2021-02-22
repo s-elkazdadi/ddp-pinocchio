@@ -475,7 +475,8 @@ struct ddp_solver_t {
     lfx.setConstant(std::numeric_limits<scalar_t>::quiet_NaN());
     lfxx.setConstant(std::numeric_limits<scalar_t>::quiet_NaN());
 
-    auto x_idx = prob.dstate_indexer(b, e);
+    auto x_idx = prob.state_indexer(b, e);
+    auto dx_idx = prob.dstate_indexer(b, e);
 
     namespace m = detail::matrix_seq;
 
@@ -484,24 +485,24 @@ struct ddp_solver_t {
         lfx,
         lfxx,
         // cost
-        m::mat_seq<scalar_t>(indexing::outer_prod(one_idx, x_idx)),
+        m::mat_seq<scalar_t>(indexing::outer_prod(one_idx, dx_idx)),
         m::mat_seq<scalar_t>(indexing::outer_prod(one_idx, u_idx)),
-        m::mat_seq<scalar_t>(indexing::outer_prod(x_idx, x_idx)),
-        m::mat_seq<scalar_t>(indexing::outer_prod(u_idx, x_idx)),
+        m::mat_seq<scalar_t>(indexing::outer_prod(dx_idx, dx_idx)),
+        m::mat_seq<scalar_t>(indexing::outer_prod(u_idx, dx_idx)),
         m::mat_seq<scalar_t>(indexing::outer_prod(u_idx, u_idx)),
         // transition function
         m::mat_seq<scalar_t>(x_idx),
-        m::mat_seq<scalar_t>(indexing::outer_prod(x_idx, x_idx)),
-        m::mat_seq<scalar_t>(indexing::outer_prod(x_idx, u_idx)),
-        m::tensor_seq<scalar_t>(indexing::tensor_indexer(x_idx, x_idx, x_idx)),
-        m::tensor_seq<scalar_t>(indexing::tensor_indexer(x_idx, u_idx, x_idx)),
-        m::tensor_seq<scalar_t>(indexing::tensor_indexer(x_idx, u_idx, u_idx)),
+        m::mat_seq<scalar_t>(indexing::outer_prod(dx_idx, dx_idx)),
+        m::mat_seq<scalar_t>(indexing::outer_prod(dx_idx, u_idx)),
+        m::tensor_seq<scalar_t>(indexing::tensor_indexer(dx_idx, dx_idx, dx_idx)),
+        m::tensor_seq<scalar_t>(indexing::tensor_indexer(dx_idx, u_idx, dx_idx)),
+        m::tensor_seq<scalar_t>(indexing::tensor_indexer(dx_idx, u_idx, u_idx)),
         // equality constraints
         m::mat_seq<scalar_t>(eq_idx.clone()),
-        m::mat_seq<scalar_t>(indexing::outer_prod(eq_idx.clone(), x_idx)),
+        m::mat_seq<scalar_t>(indexing::outer_prod(eq_idx.clone(), dx_idx)),
         m::mat_seq<scalar_t>(indexing::outer_prod(eq_idx.clone(), u_idx)),
-        m::tensor_seq<scalar_t>(indexing::tensor_indexer(eq_idx.clone(), x_idx, x_idx)),
-        m::tensor_seq<scalar_t>(indexing::tensor_indexer(eq_idx.clone(), u_idx, x_idx)),
+        m::tensor_seq<scalar_t>(indexing::tensor_indexer(eq_idx.clone(), dx_idx, dx_idx)),
+        m::tensor_seq<scalar_t>(indexing::tensor_indexer(eq_idx.clone(), u_idx, dx_idx)),
         m::tensor_seq<scalar_t>(indexing::tensor_indexer(eq_idx.clone(), u_idx, u_idx)),
     };
 
@@ -544,6 +545,42 @@ struct ddp_solver_t {
     }
 
     return storage;
+  }
+
+  struct ms_constraint_err_t {
+    scalar_t orig;
+    scalar_t slack;
+  };
+
+  template <typename Prob, decltype((std::declval<Prob>().m_dynamics, (void)0))* = nullptr>
+  auto ms_optimality_constr(Prob const&, derivative_storage_t const& derivs) const -> ms_constraint_err_t {
+    DDP_ASSERT(false);
+  }
+
+  template <typename Prob, decltype((std::declval<Prob>().m_slack_idx, (void)0))* = nullptr>
+  auto ms_optimality_constr(Prob const&, derivative_storage_t const& derivs) const -> ms_constraint_err_t {
+    using std::max;
+
+    scalar_t orig(0);
+    scalar_t slack(0);
+
+    index_t t = 0;
+    for (auto eq : derivs.eq()) {
+      auto n = prob.m_slack_idx.rows(t).value();
+      orig = max(orig, eq.val.topRows(eq.val.rows() - n).stableNorm());
+      slack = max(slack, eq.val.bottomRows(n).stableNorm());
+      ++t;
+    }
+    return {orig, slack};
+  }
+
+  auto ms_optimality_constr(derivative_storage_t const& derivs) const -> scalar_t {
+    using std::max;
+    scalar_t retval(0);
+    for (auto eq : derivs.eq()) {
+      retval = max(retval, eq.val.stableNorm());
+    }
+    return retval;
   }
 
   auto optimality_constr(derivative_storage_t const& derivs) const -> scalar_t {
@@ -680,13 +717,6 @@ struct ddp_solver_t {
       scalar_t const& w,
       scalar_t const& n,
       scalar_t const& stopping_threshold) const -> detail::tuple<mult_update_attempt_result_e, scalar_t, scalar_t> {
-    std::string name = (M == method::primal_dual_affine_multipliers //
-                            ? "/tmp/affine_mults_"
-                            : "/tmp/") +
-                       detail::to_owned(prob.name());
-    log_file_t primal_log{(name + "_primal.dat").c_str()};
-    log_file_t dual_log{(name + "_dual.dat").c_str()};
-    log_file_t mu_log{(name + "_mu.dat").c_str()};
 
     prob.compute_derivatives(derivatives, traj);
 
@@ -694,18 +724,55 @@ struct ddp_solver_t {
     fb_seq.update_origin(traj.m_state_data);
 
     auto opt_obj = optimality_obj(traj, mults, mu, derivatives);
+    auto opt_lag = optimality_lag(traj, mults, derivatives);
     auto opt_constr = optimality_constr(derivatives);
 
-    fmt::print(primal_log.ptr, "{}\n", opt_constr);
-    fmt::print(dual_log.ptr, "{}\n", opt_obj);
-    fmt::print(mu_log.ptr, "{}\n", mu);
+    // logging
+    {
+      std::string _name = detail::to_owned(prob.name());
 
-    fmt::print(
-        stdout,
-        "opt obj: {}\n"
-        "opt constr: {}\n",
-        opt_obj,
-        opt_constr);
+      std::string name = (M == method::primal_dual_affine_multipliers //
+                              ? "/tmp/affine_mults_"
+                              : "/tmp/") +
+                         _name;
+      log_file_t dual_log{(name + "_dual.dat").c_str()};
+      log_file_t mu_log{(name + "_mu.dat").c_str()};
+      log_file_t cost_log{(name + "_cost.dat").c_str()};
+
+      fmt::print(dual_log.ptr, "{}\n", opt_lag);
+      fmt::print(mu_log.ptr, "{}\n", mu);
+      fmt::print(cost_log.ptr, "{}\n", cost(traj));
+
+      if (_name.substr(0, 15) == "multi_shooting_") {
+
+        auto err = ms_optimality_constr(prob, derivatives);
+
+        log_file_t primal_log_orig{(name + "_primal_orig.dat").c_str()};
+        log_file_t primal_log_slack{(name + "_primal_slack.dat").c_str()};
+        fmt::print(primal_log_orig.ptr, "{}\n", err.orig);
+        fmt::print(primal_log_slack.ptr, "{}\n", err.slack);
+
+        fmt::print(
+            stdout,
+            "opt obj: {}\n"
+            "opt constr original: {}\n"
+            "opt constr slack   : {}\n",
+            opt_obj,
+            err.orig,
+            err.slack);
+
+      } else {
+        log_file_t primal_log{(name + "_primal.dat").c_str()};
+        fmt::print(primal_log.ptr, "{}\n", opt_constr);
+
+        fmt::print(
+            stdout,
+            "opt obj: {}\n"
+            "opt constr: {}\n",
+            opt_obj,
+            opt_constr);
+      }
+    }
 
     if (opt_constr < stopping_threshold and opt_obj < stopping_threshold) {
       return {
@@ -789,6 +856,21 @@ struct ddp_solver_t {
     out_costs(this->index_end() - this->index_begin()) = prob.lf(x);
   }
 
+  auto cost(trajectory_t const& traj) const -> scalar_t {
+    scalar_t ret = 0;
+
+    for (auto xu : traj) {
+      index_t t = xu.current_index();
+      auto const x = xu.x();
+      auto const u = xu.u();
+
+      ret += prob.l(t, x, u);
+    }
+    auto const x = traj.x_f();
+    ret += prob.lf(x);
+    return ret;
+  }
+
   ~ddp_solver_t() = default;
   ddp_solver_t(ddp_solver_t const&) = delete;
   ddp_solver_t(ddp_solver_t&&) = delete;
@@ -862,7 +944,6 @@ struct ddp_solver_t {
                             pow(mu / (previous_opt_constr / opt_constr), 1.0 / (1 - beta)),
                             mu * scalar_t{1e5}),
                         mu);
-          if (iter > 40) mu = 1e15;
           break;
         }
         case mult_update_attempt_result_e::update_success: {

@@ -1,9 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
 
 COLORS = ["#67a9cf", "#ca0020"]
 
-fig, ax = plt.subplots(figsize=(4, 3))
+fig, ax = plt.subplots(figsize=(4, 2))
 ax.spines["top"].set_visible(True)
 ax.spines["right"].set_visible(True)
 
@@ -20,13 +21,13 @@ for eps in err_a.keys():
 ax.loglog(
     list(err_c.keys()),
     list(err_c.values()),
-    label="Constant Lagrange multipliers",
+    label="λ: constant",
     color=COLORS[0],
 )
 ax.loglog(
     list(err_a.keys()),
     list(err_a.values()),
-    label="Affine Lagrange multipliers",
+    label="λ: affine",
     color=COLORS[1],
 )
 ax.legend()
@@ -39,39 +40,54 @@ fig.savefig("noise.pdf")
 
 n_iter = 80
 
+fig, ax = plt.subplots(1, figsize=(5, 3), sharex=True)
+ax = [ax]
+ax[0].spines["top"].set_visible(True)
+ax[0].spines["right"].set_visible(True)
+# ax[1].spines["top"].set_visible(True)
+# ax[1].spines["right"].set_visible(True)
 
-def plot(primal, dual, mu, out):
+
+def plot(title, path_prefix, ls):
+    primal = path_prefix + "_primal.dat"
+    dual = path_prefix + "_dual.dat"
+    mu = path_prefix + "_mu.dat"
+    cost = path_prefix + "_cost.dat"
+
     with open(primal) as f:
         primal = list(map(float, f.readlines()))[:n_iter]
     with open(dual) as f:
         dual = list(map(float, f.readlines()))[:n_iter]
     with open(mu) as f:
         mu = list(map(float, f.readlines()))[:n_iter]
+    with open(cost) as f:
+        cost = list(map(float, f.readlines()))[:n_iter]
 
-    fig, ax = plt.subplots(figsize=(4, 3))
-    ax.spines["top"].set_visible(True)
-    ax.spines["right"].set_visible(True)
-    ax.semilogy(primal, label="Primal error", color=COLORS[0])
-    ax.semilogy(dual, label="Dual error", color=COLORS[1])
+    ax[0].semilogy(
+        primal, label=title + ": Primal error", color=COLORS[0], linestyle=ls
+    )
+    ax[0].semilogy(dual, label=title + ": Dual error", color=COLORS[1], linestyle=ls)
 
-    ax.legend()
-    ax.set_xlabel("Iteration")
-    ax.set_ylabel("")
-    ax.set_ylim( 1e-300, 1e10)
-
-    fig.tight_layout()
-    fig.savefig(out)
+    # ax[1].plot(cost, label=title, color=COLORS[1], linestyle=ls)
 
 
+prefix = sys.argv[1]
 plot(
-    "result_data/cartpole_primal.dat",
-    "result_data/cartpole_dual.dat",
-    "result_data/cartpole_mu.dat",
-    "error_c.pdf",
+    "λ: constant",
+    prefix + "/cartpole",
+    ":",
 )
 plot(
-    "result_data/affine_mults_cartpole_primal.dat",
-    "result_data/affine_mults_cartpole_dual.dat",
-    "result_data/affine_mults_cartpole_mu.dat",
-    "error_a.pdf",
+    "λ: affine",
+    prefix + "/affine_mults_cartpole",
+    "-",
 )
+
+ax[0].legend()
+# ax[0].set_ylabel("")
+# ax[1].legend()
+ax[0].set_xlabel("Iteration")
+# ax[1].set_ylabel("Cost value")
+
+fig.tight_layout()
+fig.savefig(f"error_{sys.argv[2]}.pdf")

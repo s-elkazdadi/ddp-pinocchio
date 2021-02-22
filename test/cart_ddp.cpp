@@ -11,7 +11,7 @@
 #include <fmt/ostream.h>
 #include <boost/multiprecision/mpfr.hpp>
 
-#if 1
+#if 0
 using scalar_t = boost::multiprecision::number<
     boost::multiprecision::backends::mpfr_float_backend<500, boost::multiprecision::allocate_stack>,
     boost::multiprecision::et_off>;
@@ -47,9 +47,6 @@ auto main() -> int {
     }
   };
   using dynamics_t = ddp::dynamics_t<model_t>;
-  using problem_t = ddp::problem_t<
-      dynamics_t,
-      constraint_advance_time_t<constraint_advance_time_t<config_single_coord_constraint_t<model_t, constraint_t>>>>;
 
   auto eq_gen = constraint_t{vec_t{2}};
   eq_gen.m_target[0] = 0;
@@ -65,13 +62,29 @@ auto main() -> int {
   }();
 
   dynamics_t dy{model, 0.01, false};
-  problem_t prob{
-      0,
-      horizon,
-      1.0,
-      dy,
-      constraint_advance_time<2>(config_single_coord_constraint(dy, DDP_MOVE(eq_gen), 1)),
+
+  struct vel_constr_t {
+    auto eq_idx() const {
+      return indexing::range_row_filter_t<indexing::regular_indexer_t<dyn_index>>{
+          indexing::vec_regular_indexer(1, horizon + 1, dyn_index(2)),
+          horizon,
+          horizon + 1};
+    }
+    auto operator[](index_t t) const -> vec_t {
+      if (t != horizon) {
+        return eigen::make_matrix<scalar_t>(dyn_index(0));
+      }
+      return eigen::make_matrix<scalar_t>(dyn_index(2));
+    }
   };
+  auto eq_gen_v = vel_constr_t{};
+
+  auto constr = constraint_advance_time<2>(config_single_coord_constraint(dy, DDP_MOVE(eq_gen), 1));
+  auto _constrv = constraint_advance_time(velocity_constraint(dy, eq_gen_v));
+  auto prob = problem(0, horizon, 1.0, dy, concat_constraint(constr, _constrv));
+
+  using problem_t = decltype(prob);
+
   auto u_idx = indexing::vec_regular_indexer(0, horizon, nv);
   auto eq_idx = prob.m_constraint.eq_idx();
 
@@ -134,30 +147,9 @@ auto main() -> int {
   {
     constexpr auto M = method::primal_dual_constant_multipliers;
 
-    scalar_t const mu_init = 1e2;
+    scalar_t const mu_init = 1e4;
     auto res = solver.solve<M>({200, 1e-200, mu_init}, solver.make_trajectory(control_generator_t{u_idx}));
     DDP_BIND(auto&&, (traj, fb), res);
     (void)fb;
-
-    for (auto xu : traj) {
-      fmt::print("x: {}\nu: {}\n", xu.x().transpose(), xu.u().transpose());
-    }
-
-    test_noise(log_file_t{"/tmp/cart_const.dat"}, traj, fb);
-  }
-
-  {
-    constexpr auto M = method::primal_dual_affine_multipliers;
-
-    scalar_t const mu_init = 1e2;
-    auto res = solver.solve<M>({200, 1e-200, mu_init}, solver.make_trajectory(control_generator_t{u_idx}));
-    DDP_BIND(auto&&, (traj, fb), res);
-    (void)fb;
-
-    for (auto xu : traj) {
-      fmt::print("x: {}\nu: {}\n", xu.x().transpose(), xu.u().transpose());
-    }
-
-    test_noise(log_file_t{"/tmp/cart_affine.dat"}, traj, fb);
   }
 }
