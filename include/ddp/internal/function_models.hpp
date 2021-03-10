@@ -13,8 +13,8 @@ struct affine_function_seq {
   using output_space = Output_Space;
   using scalar = Scalar;
 
-  static_assert(VEG_SAME_AS(scalar, typename State_Space::scalar), "");
-  static_assert(VEG_SAME_AS(scalar, typename Output_Space::scalar), "");
+  static_assert(__VEG_SAME_AS(scalar, typename State_Space::scalar), "");
+  static_assert(__VEG_SAME_AS(scalar, typename Output_Space::scalar), "");
 
   struct layout {
     mat_seq<scalar, colvec> origin;
@@ -125,7 +125,7 @@ struct constant_function_seq {
   using output_space = Output_Space;
   using scalar = Scalar;
 
-  static_assert(VEG_SAME_AS(scalar, typename Output_Space::scalar), "");
+  static_assert(__VEG_SAME_AS(scalar, typename Output_Space::scalar), "");
 
   struct layout {
     mat_seq<scalar, colvec> val;
@@ -162,11 +162,6 @@ struct constant_function_seq {
     (void)this, (void)new_traj, (void)stack;
   }
 };
-
-// FIXME
-VEG_INSTANTIATE_CLASS(
-    affine_function_seq, double, vector_space<double>, vector_space<double>);
-VEG_INSTANTIATE_CLASS(constant_function_seq, double, vector_space<double>);
 
 } // namespace internal
 } // namespace ddp

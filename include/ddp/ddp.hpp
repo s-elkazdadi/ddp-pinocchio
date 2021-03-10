@@ -49,13 +49,13 @@ struct ddp {
 
   using scalar = typename Dynamics::scalar;
   using trajectory = ::ddp::trajectory<scalar>;
-  using key = decltype(VEG_DECLVAL(Dynamics const&).acquire_workspace());
+  using key = decltype(__VEG_DECLVAL(Dynamics const&).acquire_workspace());
 
-  using state_space = decltype(VEG_DECLVAL(Constraint const&).state_space());
+  using state_space = decltype(__VEG_DECLVAL(Constraint const&).state_space());
   using control_space =
-      decltype(VEG_DECLVAL(Constraint const&).control_space());
+      decltype(__VEG_DECLVAL(Constraint const&).control_space());
   using constraint_output_space =
-      decltype(VEG_DECLVAL(Constraint const&).output_space());
+      decltype(__VEG_DECLVAL(Constraint const&).output_space());
 
   template <method K, typename = void>
   struct multiplier_sequence;
@@ -102,7 +102,8 @@ struct ddp {
       auto multipliers = type{eq_type{begin, end, x_space, eq_space}};
 
       for (i64 t = begin; t < end; ++t) {
-        auto fn = multipliers.eq.self;
+        auto& fn = multipliers.eq.self;
+        VEG_ASSERT_ALL_OF(!fn.val.self.data.empty());
         fn.val[t].setZero();
         fn.jac[t].setZero();
         eigen::assign(fn.origin[t], traj.self.x[t]);
@@ -232,7 +233,7 @@ struct ddp {
         veg::narrow<usize>(req.align));
 
     veg::dynamic_stack_view stack(veg::slice<void>{stack_storage});
-    for (i64 i = 0; i < 200; ++i) {
+    for (i64 i = 0; i < 3000; ++i) {
 
       internal::compute_second_derivatives(
           derivs, self.cost, self.dynamics, self.constraint, traj, stack);
@@ -276,8 +277,9 @@ struct ddp {
 
       expected_decrease = 0;
 
-      for (i64 t = current_traj.index_begin(); t < current_traj.index_end();
-           ++t) {
+      for (i64 t = current_traj.index_end() - 1;
+           t >= current_traj.index_begin();
+           --t) {
         auto xu = current_traj[t];
 
         auto lx = derivatives.lx(t);
@@ -490,7 +492,7 @@ struct ddp {
       }
     }
 
-    return {VEG_FWD(k), step};
+    return {elems, VEG_FWD(k), step};
   }
 
   template <typename Mults>
@@ -520,16 +522,12 @@ struct ddp {
       k = self.constraint.eval_to(ce, t, x, u, VEG_FWD(k), stack);
       mults.eq.eval_to(pe, t, x, stack);
 
+      if (ce.rows() > 0) {
+        fmt::print("{}\n", ce.norm());
+      }
+
       out[t - traj.index_begin()] =
           l + eigen::dot(pe, ce) + (mu / 2) * eigen::dot(ce, ce);
-
-      fmt::print(
-          "t: {:>3}  "
-          "cost: {:>10}  "
-          "constraint: {:>6.3e}\n",
-          t,
-          l,
-          ce);
     }
 
     auto x = traj.x_f();
@@ -559,7 +557,7 @@ struct ddp_fn {
   }
 };
 } // namespace fn
-VEG_ODR_VAR(ddp, fn::ddp_fn);
+__VEG_ODR_VAR(ddp, fn::ddp_fn);
 } // namespace make
 
 } // namespace ddp

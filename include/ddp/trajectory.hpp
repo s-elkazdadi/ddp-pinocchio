@@ -28,10 +28,10 @@ struct trajectory {
 
   auto operator[](i64 t) const
       -> veg::tuple<view<T const, colvec>, view<T const, colvec>> {
-    return {self.x[t], self.u[t]};
+    return {elems, self.x[t], self.u[t]};
   }
   auto operator[](i64 t) -> veg::tuple<view<T, colvec>, view<T, colvec>> {
-    return {self.x[t], self.u[t]};
+    return {elems, self.x[t], self.u[t]};
   }
   auto x(i64 t) -> view<T, colvec> { return {self.x[t]}; }
   auto x(i64 t) const -> view<T const, colvec> { return {self.x[t]}; }
@@ -42,9 +42,6 @@ struct trajectory {
   }
   auto x_f() -> view<T, colvec> { return self.x[self.x.index_end() - 1]; }
 };
-
-// FIXME
-VEG_INSTANTIATE_CLASS(trajectory, double);
 
 } // namespace ddp
 

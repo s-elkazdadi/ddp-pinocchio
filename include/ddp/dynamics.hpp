@@ -137,6 +137,7 @@ struct pinocchio_dynamics_free {
 
     // v_out = acc
     fu_q.setZero();
+    k = self.model.dynamics_aba(v_out, q, v, u, veg::none, VEG_FWD(k));
     k = self.model.d_dynamics_aba(
         fx_vq, fx_vv, fu_v, q, v, u, veg::none, VEG_FWD(k));
 
@@ -155,24 +156,6 @@ struct pinocchio_dynamics_free {
   }
 };
 
-// FIXME
-VEG_INSTANTIATE_CLASS(pinocchio_dynamics_free, double);
-
-VEG_INSTANTIATE(
-    second_order_deriv_2,
-    pinocchio_dynamics_free<double> const&,
-    tensor_view<double>,
-    tensor_view<double>,
-    tensor_view<double>,
-    view<double, colmat>,
-    view<double, colmat>,
-    view<double, colvec>,
-    i64,
-    view<double const, colvec>,
-    view<double const, colvec>,
-    pinocchio_dynamics_free<double>::key,
-    veg::dynamic_stack_view);
-
 namespace make {
 namespace fn {
 struct pinocchio_dynamics_free_fn {
@@ -190,7 +173,7 @@ struct pinocchio_dynamics_free_fn {
   }
 };
 } // namespace fn
-VEG_ODR_VAR(pinocchio_dynamics_free, fn::pinocchio_dynamics_free_fn);
+__VEG_ODR_VAR(pinocchio_dynamics_free, fn::pinocchio_dynamics_free_fn);
 } // namespace make
 
 } // namespace ddp

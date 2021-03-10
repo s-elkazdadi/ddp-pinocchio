@@ -26,9 +26,6 @@ inline auto prod_idx(idx_view<colvec> l, idx_view<colvec> r) -> idx<colmat> {
   };
 }
 
-// FIXME
-VEG_INSTANTIATE(shift_time_idx<colmat>, idx<colmat>, i64);
-
 } // namespace idx
 } // namespace ddp
 

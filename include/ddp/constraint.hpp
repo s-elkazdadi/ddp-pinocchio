@@ -6,11 +6,13 @@
 namespace ddp {
 using namespace veg::literals;
 
-template <typename Dynamics, typename Fn>
+template <typename Dynamics, typename Fn, typename Fn_Dim>
 struct config_constraint {
   struct layout {
     Dynamics const& dynamics;
     Fn target_generator;
+    Fn_Dim dim_generator;
+    i64 max_dim;
     mem_req generator_mem_req;
   } self;
 
@@ -19,8 +21,10 @@ struct config_constraint {
 
   auto dynamics() const -> decltype(auto) { return self.dynamics; }
 
+  auto dim(i64 t) const -> i64 { return self.dim_generator(t); }
+  auto max_dim() const -> i64 { return self.max_dim; }
   auto output_space() const {
-    return vector_space<scalar>{{dynamics().self.model.tangent_dim()}};
+    return vector_space_from_parent<scalar, config_constraint const&>{{*this}};
   }
   auto state_space() const { return dynamics().state_space(); }
   auto control_space() const { return dynamics().control_space(); }
@@ -102,20 +106,6 @@ struct config_constraint {
     return k;
   }
 };
-
-namespace make {
-namespace fn {
-struct config_constraint_fn {
-  template <typename Dynamics, typename Fn>
-  auto
-  operator()(Dynamics const& dynamics, Fn target_gen, mem_req gen_mem_req) const
-      -> config_constraint<Dynamics, Fn> {
-    return {{dynamics, VEG_FWD(target_gen), gen_mem_req}};
-  }
-};
-} // namespace fn
-VEG_ODR_VAR(config_constraint, fn::config_constraint_fn);
-} // namespace make
 
 template <typename Dynamics, typename Fn>
 struct velocity_constraint {
@@ -211,16 +201,6 @@ struct velocity_constraint {
   }
 };
 
-// FIXME
-VEG_INSTANTIATE_CLASS(
-    config_constraint,
-    pinocchio_dynamics_free<double>,
-    veg::fn_ref<view<double const, colvec>(i64, veg::dynamic_stack_view)>);
-VEG_INSTANTIATE_CLASS(
-    velocity_constraint,
-    pinocchio_dynamics_free<double>,
-    veg::fn_ref<view<double const, colvec>(i64, veg::dynamic_stack_view)>);
-
 template <typename Constraint>
 struct constraint_advance_time {
   struct layout {
@@ -234,7 +214,13 @@ struct constraint_advance_time {
 
   auto state_space() const { return self.constr.state_space(); }
   auto control_space() const { return self.constr.control_space(); }
-  auto output_space() const { return self.constr.output_space(); }
+
+  auto dim(i64 t) const -> i64 { return self.constr.dim(t + 1); }
+  auto max_dim() const -> i64 { return self.constr.max_dim(); }
+  auto output_space() const {
+    return vector_space_from_parent<scalar, constraint_advance_time const&>{
+        {*this}};
+  }
 
   auto eval_to_req() const -> mem_req {
     return mem_req::sum_of({
@@ -302,7 +288,7 @@ struct constraint_advance_time {
     auto ndx = dynamics().output_space().ddim(t);
     auto ndu1 = dynamics().control_space().ddim(t);
     auto ndu2 = dynamics().control_space().ddim(t + 1);
-    auto nde = output_space().ddim(t + 1);
+    auto nde = output_space().ddim(t);
 
     constexpr auto tag = veg::tag<scalar>;
 
@@ -321,6 +307,14 @@ struct constraint_advance_time {
     auto eq_n_x = eigen::slice_to_mat(_eq_n_x, nde, ndx);
     auto eq_n_u = eigen::slice_to_mat(_eq_n_u, nde, ndu2);
 
+    VEG_DEBUG_ASSERT_ALL_OF(
+        out_x.rows() == eq_n_x.rows(),
+        out_x.cols() == fx_n.cols(),
+        eq_n_x.cols() == fx_n.rows(),
+        out_u.rows() == eq_n_x.rows(),
+        out_u.cols() == fu_n.cols(),
+        eq_n_x.cols() == fu_n.rows());
+
     k = self.constr.d_eval_to(
         eq_n_x, eq_n_u, out, t + 1, eigen::as_const(x_n), u, VEG_FWD(k), stack);
 
@@ -338,13 +332,6 @@ struct constraint_advance_time {
   }
 };
 
-// FIXME
-VEG_INSTANTIATE_CLASS(
-    constraint_advance_time,
-    config_constraint<
-        pinocchio_dynamics_free<double>,
-        veg::fn_ref<view<double const, colvec>(i64, veg::dynamic_stack_view)>>);
-
 template <typename Constr1, typename Constr2>
 struct concat_constraint {
   struct layout {
@@ -353,8 +340,9 @@ struct concat_constraint {
   } self;
 
   static_assert(
-      VEG_SAME_AS(typename Constr1::scalar, typename Constr2::scalar), "");
-  static_assert(VEG_SAME_AS(typename Constr1::key, typename Constr2::key), "");
+      __VEG_SAME_AS(typename Constr1::scalar, typename Constr2::scalar), "");
+  static_assert(
+      __VEG_SAME_AS(typename Constr1::key, typename Constr2::key), "");
 
   using key = typename Constr1::key;
   using scalar = typename Constr1::scalar;
@@ -429,15 +417,36 @@ struct concat_constraint {
   }
 };
 
-// FIXME
-VEG_INSTANTIATE_CLASS(
-    concat_constraint,
-    config_constraint<
-        pinocchio_dynamics_free<double>,
-        veg::fn_ref<view<double const, colvec>(i64, veg::dynamic_stack_view)>>,
-    config_constraint<
-        pinocchio_dynamics_free<double>,
-        veg::fn_ref<view<double const, colvec>(i64, veg::dynamic_stack_view)>>);
+namespace make {
+namespace fn {
+struct config_constraint {
+  template <typename Dynamics, typename Fn, typename Fn_Dim>
+  auto operator()(
+      Dynamics const& dynamics,
+      Fn target_gen,
+      Fn_Dim dim_gen,
+      i64 max_dim,
+      mem_req gen_mem_req) const
+      -> ddp::config_constraint<Dynamics, Fn, Fn_Dim> {
+    return {
+        {dynamics,
+         VEG_FWD(target_gen),
+         VEG_FWD(dim_gen),
+         max_dim,
+         gen_mem_req}};
+  }
+};
+struct constraint_advance_time {
+  template <typename Constraint>
+  auto operator()(Constraint&& constr) const
+      -> ddp::constraint_advance_time<Constraint> {
+    return {{VEG_FWD(constr)}};
+  }
+};
+} // namespace fn
+__VEG_ODR_VAR(config_constraint, fn::config_constraint);
+__VEG_ODR_VAR(constraint_advance_time, fn::constraint_advance_time);
+} // namespace make
 
 } // namespace ddp
 

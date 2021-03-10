@@ -106,7 +106,6 @@ struct idx : internal::idx_base<idx<K>, K> {
   auto dim_data_impl() const { return self.dim_data.data(); }
   auto offset_data_impl() const { return self.offset_data.data(); }
 
-private:
   friend struct internal::idx_base<idx_view<K>, K>;
   struct layout {
     std::vector<dims<K>> dim_data;
@@ -145,7 +144,7 @@ private:
 public:
   VEG_TEMPLATE(
       typename Fn,
-      requires VEG_SAME_AS(
+      requires __VEG_SAME_AS(
           dims<K>, (meta::detected_t<meta::invoke_result_t, Fn&, i64>)),
       idx,
       (begin, i64),
@@ -158,7 +157,7 @@ public:
   }
 
   auto into_parts() && -> veg::tuple<typename base::layout, layout> {
-    return {base::self, self};
+    return {elems, base::self, self};
   }
 
   using base::index_begin;
@@ -178,7 +177,6 @@ struct mat_seq {
   using const_view = view<T const, K>;
   using mut_view = view<T, K>;
 
-private:
   struct layout {
     std::vector<T> data;
     idx::idx<K> idx;
@@ -211,22 +209,13 @@ public:
         (t >= self.idx.index_begin()),
         (t < self.idx.index_end()));
     return eigen::dyn_cast<view, K>(view<T, colmat>{
-        veg::mem::addressof(
-            self.data[veg::narrow<veg::usize>(self.idx.offset(t))]),
+        self.data.data() + self.idx.offset(t),
         self.idx.rows(t),
         self.idx.cols(t),
         self.idx.rows(t),
     });
   }
 };
-
-// FIXME
-VEG_INSTANTIATE_CLASS(mat_seq, double, colmat);
-VEG_INSTANTIATE_CLASS(mat_seq, double, colvec);
-VEG_INSTANTIATE(
-    idx::idx<colmat>, i64, i64, veg::fn_ref<idx::dims<colmat>(i64)>);
-VEG_INSTANTIATE(
-    idx::idx<colvec>, i64, i64, veg::fn_ref<idx::dims<colvec>(i64)>);
 
 } // namespace internal
 } // namespace ddp

@@ -4,7 +4,12 @@
 #include "ddp/ddp.hpp"
 #include <fmt/core.h>
 
-using scalar = double;
+#include <boost/multiprecision/mpfr.hpp>
+
+namespace mp = boost::multiprecision;
+using scalar = mp::number<
+    mp::backends::mpfr_float_backend<500, mp::allocate_stack>,
+    mp::et_off>;
 
 namespace eigen = ddp::eigen;
 using namespace veg::literals;
@@ -20,14 +25,30 @@ auto main() -> int {
 
   auto dynamics = ddp::make::pinocchio_dynamics_free(m, 0.01);
   eigen::matrix<scalar, ddp::colvec> q0(m.config_dim());
+  eigen::matrix<scalar, ddp::colvec> empty(0);
   dynamics.neutral_configuration(eigen::as_mut(q0));
 
-  auto constraint = ddp::make::config_constraint(
-      dynamics,
-      [&](veg::i64 /*t*/, veg::dynamic_stack_view /*stack*/) {
-        return eigen::as_const(q0);
-      },
-      ddp::mem_req{veg::tag<scalar>, 0});
+  auto constraint =                           //
+      ddp::make::constraint_advance_time(     //
+          ddp::make::constraint_advance_time( //
+              ddp::make::config_constraint(
+                  dynamics,
+                  [&](veg::i64 t, veg::dynamic_stack_view /*stack*/) {
+                    if (t == 20) {
+                      return eigen::as_const(q0);
+                    } else {
+                      return eigen::as_const(empty);
+                    }
+                  },
+                  [&](veg::i64 t) -> veg::i64 {
+                    if (t == 20) {
+                      return q0.size();
+                    } else {
+                      return 0;
+                    }
+                  },
+                  q0.size(),
+                  ddp::mem_req{veg::tag<scalar>, 0})));
 
   auto cost = [&] {
     eigen::matrix<scalar, ddp::colvec> u0(nv);
@@ -39,7 +60,7 @@ auto main() -> int {
 
     U0.setIdentity();
     X0.setZero();
-    fmt::print("{:>8.3e}\n", U0);
+    fmt::print("{:>8}\n", U0);
 
     return ddp::make::quadratic_cost_fixed_size(
         eigen::as_const(u0),

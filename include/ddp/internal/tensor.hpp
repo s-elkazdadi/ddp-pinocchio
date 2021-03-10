@@ -93,7 +93,6 @@ struct tensor_idx_view : internal::tensor_idx_view_base<tensor_idx_view> {
 };
 
 struct tensor_idx : internal::tensor_idx_view_base<tensor_idx> {
-private:
   using base = internal::tensor_idx_view_base<tensor_idx>;
   friend struct internal::tensor_idx_view_base<tensor_idx>;
   struct layout {
@@ -140,7 +139,7 @@ private:
 public:
   VEG_TEMPLATE(
       typename Fn,
-      requires VEG_SAME_AS(
+      requires __VEG_SAME_AS(
           tensor_dims, (meta::detected_t<meta::invoke_result_t, Fn&, i64>)),
       tensor_idx,
       (begin, i64),
@@ -268,8 +267,6 @@ struct tensor_view {
   }
 };
 
-// FIXME
-VEG_INSTANTIATE_CLASS(tensor_view, double);
 } // namespace tensor
 using tensor::tensor_view;
 
@@ -290,7 +287,7 @@ struct tensor_seq_view {
         (t >= self.idx.index_begin()),
         (t < self.idx.index_end()));
     return {
-        veg::mem::addressof(self.data[self.idx.offset(t)]),
+        self.data.data() + self.idx.offset(t),
         self.idx.out(t),
         self.idx.left(t),
         self.idx.right(t),

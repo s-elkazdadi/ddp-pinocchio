@@ -245,13 +245,14 @@ template <
     typename T,
     kind K = internal::kind_of<meta::remove_cvref_t<T>>::value,
     typename View =
-        view<std::remove_pointer_t<decltype(VEG_DECLVAL(T).data())>, K>>
+        view<std::remove_pointer_t<decltype(__VEG_DECLVAL(T).data())>, K>>
 
 VEG_NODISCARD auto split_at_row(T&& mat, i64 row) -> tuple<View, View> {
   static_assert(
       internal::kind_of<meta::remove_cvref_t<T>>::value != kind::rowvec, "");
   VEG_ASSERT_ALL_OF((row >= 0), (row <= mat.rows()));
   return {
+      elems,
       View{mat.data(), row, mat.cols(), mat.outerStride()},
       View{
           veg::mem::addressof(mat.coeffRef(row, 0)),
@@ -265,13 +266,14 @@ template <
     typename T,
     kind K = internal::kind_of<meta::remove_cvref_t<T>>::value,
     typename View =
-        view<std::remove_pointer_t<decltype(VEG_DECLVAL(T).data())>, K>>
+        view<std::remove_pointer_t<decltype(__VEG_DECLVAL(T).data())>, K>>
 
 VEG_NODISCARD auto split_at_col(T&& mat, i64 col) -> tuple<View, View> {
   static_assert(
       internal::kind_of<meta::remove_cvref_t<T>>::value != kind::colvec, "");
   VEG_ASSERT_ALL_OF((col >= 0), (col <= mat.cols()));
   return {
+      elems,
       View{mat.data(), mat.rows(), col, mat.outerStride()},
       View{
           veg::mem::addressof(mat.coeffRef(0, col)),
@@ -284,7 +286,7 @@ VEG_NODISCARD auto split_at_col(T&& mat, i64 col) -> tuple<View, View> {
 template <
     typename T,
     typename View = view<
-        std::remove_pointer_t<decltype(VEG_DECLVAL(T).data())>,
+        std::remove_pointer_t<decltype(__VEG_DECLVAL(T).data())>,
         kind::colmat>>
 
 VEG_NODISCARD auto split_at(T&& mat, i64 row, i64 col)
@@ -298,6 +300,7 @@ VEG_NODISCARD auto split_at(T&& mat, i64 row, i64 col)
       (col <= mat.cols()));
   auto const os = mat.outerStride();
   return {
+      elems,
       View{mat.data(), row, col, os},
       View{
           veg::mem::addressof(mat.coeffRef(0, col)), row, mat.cols() - col, os},
@@ -355,7 +358,7 @@ inline auto aliases_impl(
 template <typename T, typename U>
 auto aliases_impl_2(T const& t, U const& u) -> bool {
   static_assert(
-      meta::is_same<typename T::Scalar, typename U::Scalar>::value,
+      std::is_same<typename T::Scalar, typename U::Scalar>::value,
       "no type mixing please v_v");
   return internal::aliases_impl(
       sizeof(typename T::Scalar),
@@ -380,14 +383,14 @@ auto aliases(T const& t, Ts const&... ts) -> bool {
 
 template <typename T>
 auto slice_to_vec(T& s) -> view<
-    meta::remove_pointer_t<decltype(VEG_DECLVAL(T&).data())>,
+    meta::remove_pointer_t<decltype(__VEG_DECLVAL(T&).data())>,
     kind::colvec> {
   auto size = veg::narrow<i64>(s.size());
   return {s.data(), size, 1, size};
 }
 template <typename T>
 auto slice_to_mat(T& s, i64 nrows, i64 ncols) -> view<
-    meta::remove_pointer_t<decltype(VEG_DECLVAL(T&).data())>,
+    meta::remove_pointer_t<decltype(__VEG_DECLVAL(T&).data())>,
     kind::colmat> {
   VEG_DEBUG_ASSERT(nrows * ncols == s.size());
   return {s.data(), nrows, ncols, nrows};
@@ -426,8 +429,7 @@ void tmul_add_to_noalias(Out&& out, InL const& lhs, InR const& rhs) {
 }
 template <typename In>
 auto dot(In const& lhs, In const& rhs) -> typename In::Scalar {
-  return typename In::Scalar(
-      eigen::as_const(lhs).transpose().operator*(eigen::as_const(rhs)));
+  return (eigen::as_const(lhs.transpose()).operator*(eigen::as_const(rhs)))[0];
 }
 template <typename Out>
 void add_identity(
@@ -495,7 +497,7 @@ struct fmt::formatter<
     Matrix,
     char,
     veg::meta::enable_if_t<
-        veg::meta::is_base_of<Eigen::MatrixBase<Matrix>, Matrix>::value>>
+        std::is_base_of<Eigen::MatrixBase<Matrix>, Matrix>::value>>
     : fmt::formatter<typename Matrix::Scalar> {
 
   using scalar = veg::meta::remove_cv_t<typename Matrix::Scalar>;

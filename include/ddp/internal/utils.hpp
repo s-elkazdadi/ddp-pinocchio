@@ -9,13 +9,17 @@
 #include <fmt/ostream.h>
 
 namespace ddp {
-namespace meta {
-using namespace veg::meta;
-}
 using veg::i64;
 using veg::usize;
 using veg::tuple;
 using veg::option;
+using veg::narrow;
+using veg::dynamic_stack_view;
+using namespace veg::literals;
+using namespace veg::tags;
+namespace meta {
+using namespace veg::meta;
+}
 
 struct mem_req {
   i64 align;

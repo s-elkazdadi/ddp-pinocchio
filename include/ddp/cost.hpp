@@ -63,7 +63,7 @@ struct quadratic_cost_fixed_size {
       view<T const, colvec> x,
       veg::dynamic_stack_view stack) const {
 
-    (void)stack;
+    (void)stack, (void)x;
     auto nx = veg::narrow<i64>(self.rf.size());
 
     VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
@@ -88,12 +88,16 @@ struct quadratic_cost_fixed_size {
       auto _tmp1 = stack.make_new(veg::tag<T>, x.rows()).unwrap();
       auto tmp1 = eigen::slice_to_vec(_tmp1);
       eigen::mul_add_to_noalias(tmp1, eigen::slice_to_mat(self.R, nx, nx), x);
+
+      out += eigen::dot(eigen::as_const(tmp1), x) / 2;
       out += eigen::dot(eigen::slice_to_vec(self.r), x);
     }
     {
       auto _tmp1 = stack.make_new(veg::tag<T>, u.rows()).unwrap();
       auto tmp1 = eigen::slice_to_vec(_tmp1);
       eigen::mul_add_to_noalias(tmp1, eigen::slice_to_mat(self.Q, nu, nu), u);
+
+      out += eigen::dot(eigen::as_const(tmp1), u) / 2;
       out += eigen::dot(eigen::slice_to_vec(self.q), u);
     }
     return out;
@@ -142,8 +146,6 @@ struct quadratic_cost_fixed_size {
   }
 };
 
-VEG_INSTANTIATE_CLASS(quadratic_cost_fixed_size, double);
-
 namespace make {
 namespace fn {
 struct quadratic_cost_fixed_size_fn {
@@ -157,6 +159,7 @@ struct quadratic_cost_fixed_size_fn {
       eigen::view<T const, colmat> Rf) const -> quadratic_cost_fixed_size<T> {
     auto nq = q.size();
     auto nr = r.size();
+    (void)nq, (void)nr;
     VEG_DEBUG_ASSERT_ALL_OF(
         Q.rows() == nq,
         Q.cols() == nq,
@@ -180,7 +183,7 @@ struct quadratic_cost_fixed_size_fn {
   }
 };
 } // namespace fn
-VEG_ODR_VAR(quadratic_cost_fixed_size, fn::quadratic_cost_fixed_size_fn);
+__VEG_ODR_VAR(quadratic_cost_fixed_size, fn::quadratic_cost_fixed_size_fn);
 } // namespace make
 
 } // namespace ddp

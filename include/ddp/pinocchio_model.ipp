@@ -751,6 +751,7 @@ auto model<T>::frame_classical_acceleration(i64 frame_id, key k) const
       (ang.cols() == 1));
 
   return {
+      elems,
       VEG_FWD(k),
       {
           {ang[0], ang[1], ang[2]},
@@ -773,6 +774,7 @@ auto model<T>::frame_velocity(i64 frame_id, key k) const
   auto const& ang = vel.angular();
 
   return {
+      elems,
       VEG_FWD(k),
       {
           {ang[0], ang[1], ang[2]},
@@ -850,6 +852,7 @@ auto model<T>::frame_se3(i64 frame_id, key k) const -> tuple<key, se3<T>> {
       (rot.cols() == 3));
 
   return {
+      elems,
       VEG_FWD(k),
       {
           // clang-format off

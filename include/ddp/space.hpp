@@ -13,19 +13,19 @@ auto space_to_idx(Space space, i64 begin, i64 end) -> idx::idx<colvec> {
   return {begin, end, [&](i64 t) { return idx::dims<colvec>{space.dim(t)}; }};
 }
 
-template <typename T>
-struct vector_space {
+template <typename T, typename Parent>
+struct vector_space_from_parent {
   struct layout {
-    i64 dim;
+    Parent parent;
   } self;
   using scalar = T;
 
   auto tangent() const { return *this; }
 
-  auto dim(i64 t) const { return (void)t, self.dim; }
-  auto ddim(i64 t) const { return (void)t, self.dim; }
-  auto max_dim() const { return self.dim; }
-  auto max_ddim() const { return self.dim; }
+  auto dim(i64 t) const { return self.parent.dim(t); }
+  auto ddim(i64 t) const { return dim(t); }
+  auto max_dim() const { return self.parent.max_dim(); }
+  auto max_ddim() const { return max_dim(); }
 
   auto integrate_req() const -> mem_req {
     (void)this;
@@ -38,10 +38,10 @@ struct vector_space {
       view<T const, colvec> dx,
       veg::dynamic_stack_view stack) const {
     (void)t, (void)stack;
-    VEG_ASSERT_ALL_OF( //
-        (x_out.rows() == self.dim),
-        (dx.rows() == self.dim),
-        (x.rows() == self.dim));
+    VEG_DEBUG_ASSERT_ALL_OF( //
+        (x_out.rows() == dim(t)),
+        (dx.rows() == ddim(t)),
+        (x.rows() == dim(t)));
     eigen::add_to(x_out, x, dx);
   }
 
@@ -58,11 +58,11 @@ struct vector_space {
       veg::dynamic_stack_view stack) const {
     (void)t, (void)x, (void)dx, (void)stack;
 
-    VEG_ASSERT_ALL_OF( //
-        (dx_out.rows() == self.dim),
-        (dx_out.cols() == self.dim),
-        (dx.rows() == self.dim),
-        (x.rows() == self.dim));
+    VEG_DEBUG_ASSERT_ALL_OF(
+        dx_out.rows() == ddim(t),
+        dx_out.cols() == ddim(t),
+        dx.rows() == ddim(t),
+        x.rows() == dim(t));
 
     dx_out.setIdentity();
   }
@@ -80,10 +80,10 @@ struct vector_space {
       veg::dynamic_stack_view stack) const {
 
     (void)t, (void)stack;
-    VEG_DEBUG_ASSERT_ALL_OF(
-        (out.rows() == ddim(t)),
-        (start.rows() == dim(t)),
-        (finish.rows() == dim(t)));
+    VEG_DEBUG_ASSERT_ALL_OF( //
+        out.rows() == ddim(t),
+        start.rows() == dim(t),
+        finish.rows() == dim(t));
 
     eigen::sub_to(out, finish, start);
   }
@@ -102,14 +102,23 @@ struct vector_space {
 
     (void)t, (void)start, (void)finish, (void)stack;
     VEG_DEBUG_ASSERT_ALL_OF(
-        (out.rows() == ddim(t)),
-        (out.cols() == ddim(t)),
-        (start.rows() == dim(t)),
-        (finish.rows() == dim(t)));
+        out.rows() == ddim(t),
+        out.cols() == ddim(t),
+        start.rows() == dim(t),
+        finish.rows() == dim(t));
 
     out.setIdentity();
   }
 };
+
+struct constant_dim {
+  i64 dim_;
+  auto dim(i64 /*t*/) const -> i64 { return dim_; }
+  auto max_dim() const -> i64 { return dim_; }
+};
+
+template <typename T>
+using vector_space = vector_space_from_parent<T, constant_dim>;
 
 template <typename T>
 struct pinocchio_state_space {
@@ -282,8 +291,6 @@ struct pinocchio_state_space {
     out_vv.setIdentity();
   }
 };
-
-VEG_INSTANTIATE(space_to_idx, vector_space<double>, i64, i64);
 
 } // namespace ddp
 
