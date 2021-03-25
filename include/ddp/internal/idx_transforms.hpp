@@ -8,22 +8,22 @@ namespace idx {
 
 template <eigen::kind K>
 auto shift_time_idx(idx<K> i, i64 dt) -> idx<K> {
-  VEG_BIND(auto, (base, self), VEG_FWD(i).into_parts());
-  return {
-      base.begin - dt,
-      base.end - dt,
-      [&](i64 t) { return self.dim_data[veg::narrow<usize>(t - base.begin)]; },
-  };
+	VEG_BIND(auto, (base, self), VEG_FWD(i).into_parts());
+	return {
+			base.begin - dt,
+			base.end - dt,
+			[&](i64 t) { return self.dim_data[narrow<usize>(t - base.begin)]; },
+	};
 }
 
 inline auto prod_idx(idx_view<colvec> l, idx_view<colvec> r) -> idx<colmat> {
-  return {
-      l.index_begin(),
-      l.index_end(),
-      [&](i64 t) -> dims<colmat> {
-        return {l.rows(t), r.rows(t)};
-      },
-  };
+	return {
+			l.index_begin(),
+			l.index_end(),
+			[&](i64 t) -> dims<colmat> {
+				return {l.rows(t), r.rows(t)};
+			},
+	};
 }
 
 } // namespace idx

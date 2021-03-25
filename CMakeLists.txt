@@ -42,7 +42,7 @@ set(CONAN_REQUIRES
     backward-cpp/1.5
     #
     # Mozilla Public License 2.0
-    eigen/3.3.9
+    eigen/3.3.7
     #
     # New (Revised) BSD License
     blaze/3.8

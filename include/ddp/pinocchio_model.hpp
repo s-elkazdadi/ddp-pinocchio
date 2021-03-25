@@ -3,7 +3,6 @@
 
 #include "ddp/internal/utils.hpp"
 #include "ddp/internal/eigen.hpp"
-#include <example-robot-data/path.hpp>
 #include <memory>
 
 namespace ddp {
@@ -11,23 +10,23 @@ namespace pinocchio {
 
 template <typename T>
 struct skew_mat {
-  veg::array<T, 9> data;
+	array<T, 9> data;
 };
 
 template <typename T>
 struct se3 {
-  veg::array<T, 9> rot /* 3x3 col major */;
-  veg::array<T, 3> trans;
+	array<T, 9> rot /* 3x3 col major */;
+	array<T, 3> trans;
 };
 template <typename T>
 struct motion {
-  veg::array<T, 3> angular;
-  veg::array<T, 3> linear;
+	array<T, 3> angular;
+	array<T, 3> linear;
 };
 template <typename T>
 struct force {
-  veg::array<T, 3> angular;
-  veg::array<T, 3> linear;
+	array<T, 3> angular;
+	array<T, 3> linear;
 };
 
 namespace internal {
@@ -36,219 +35,223 @@ struct pinocchio_impl;
 
 template <typename T>
 struct model {
-  using scalar = T;
+	using scalar = T;
 
-  using mut_vec = view<T, colvec>;
-  using const_vec = view<T const, colvec>;
+	using mut_vec = view<T, colvec>;
+	using const_vec = view<T const, colvec>;
 
-  using mut_colmat = view<T, colmat>;
-  using const_colmat = view<T const, colmat>;
+	using mut_colmat = view<T, colmat>;
+	using const_colmat = view<T const, colmat>;
 
 private:
-  struct model_impl;
-  struct data_impl;
-  friend struct internal::pinocchio_impl;
-  model() = default;
+	struct model_impl;
+	struct data_impl;
+	friend struct internal::pinocchio_impl;
+	model() = default;
 
-  struct layout {
-    model_impl* model = nullptr;
-    data_impl* data = nullptr;
-    i64 num_data = 0;
-    i64 config_dim = 0;
-    i64 tangent_dim = 0;
-  } self;
+	struct layout {
+		model_impl* model = nullptr;
+		data_impl* data = nullptr;
+		i64 num_data = 0;
+		i64 config_dim = 0;
+		i64 tangent_dim = 0;
+	} self;
 
 public:
-  struct key {
-    key() = default;
+	struct key {
+		key() = default;
 
-    key(key const&) = delete;
-    key(key&& other) noexcept : parent{other.parent} { other.parent = nullptr; }
-    auto operator=(key const&) -> key& = delete;
-    auto operator=(key&& other) noexcept -> key& {
-      VEG_ASSERT("no wasting keys :<", !(*this));
+		key(key const&) = delete;
+		key(key&& other) noexcept : parent{other.parent} { other.parent = nullptr; }
+		auto operator=(key const&) -> key& = delete;
+		auto operator=(key&& other) noexcept -> key& {
+			VEG_ASSERT("no wasting keys :<", !(*this));
 
-      destroy();
-      parent = other.parent;
-      other.parent = nullptr;
-      return *this;
-    }
-    ~key() { destroy(); }
+			destroy();
+			parent = other.parent;
+			other.parent = nullptr;
+			return *this;
+		}
+		~key() { destroy(); }
 
-    explicit operator bool() const { return parent != nullptr; }
+		explicit operator bool() const { return parent != nullptr; }
 
-  private:
-    void destroy();
-    friend struct model;
-    explicit key(data_impl& ref) : parent{&ref} {};
-    data_impl* parent = nullptr;
-  };
+	private:
+		void destroy();
+		friend struct model;
+		explicit key(data_impl& ref) : parent{&ref} {};
+		data_impl* parent = nullptr;
+	};
 
-  ~model();
-  model(model const&) = delete;
-  model(model&&) noexcept;
+	~model();
+	model(model const&) = delete;
+	model(model&&) noexcept;
 
-  auto operator=(model const&) -> model& = delete;
-  auto operator=(model&&) -> model& = delete;
+	auto operator=(model const&) -> model& = delete;
+	auto operator=(model&&) -> model& = delete;
 
-  auto model_name() const -> fmt::string_view;
+	auto model_name() const -> ::fmt::string_view;
 
-  explicit model(
-      fmt::string_view urdf_path,
-      i64 n_parallel = 1,
-      bool add_freeflyer_base = false);
-  static auto all_joints_test_model(i64 n_parallel = 1) -> model;
+	explicit model(
+			::fmt::string_view urdf_path,
+			i64 n_parallel = 1,
+			bool add_freeflyer_base = false);
+	static auto all_joints_test_model(i64 n_parallel = 1) -> model;
 
-  auto config_dim() const -> i64 { return self.config_dim; }
-  auto tangent_dim() const -> i64 { return self.tangent_dim; }
+	auto config_dim() const -> i64 { return self.config_dim; }
+	auto tangent_dim() const -> i64 { return self.tangent_dim; }
 
-  auto acquire_workspace() const -> key;
+	auto acquire_workspace() const -> key;
 
-  void neutral_configuration(mut_vec out_q) const;
-  void random_configuration(mut_vec out_q) const;
+	void neutral_configuration(mut_vec out_q) const;
+	void random_configuration(mut_vec out_q) const;
 
-  void integrate(    //
-      mut_vec out_q, //
-      const_vec q,   //
-      const_vec v    //
-  ) const;
+	void integrate(    //
+			mut_vec out_q, //
+			const_vec q,   //
+			const_vec v    //
+	) const;
 
-  void d_integrate_dq(     //
-      mut_colmat out_q_dq, //
-      const_vec q,         //
-      const_vec v          //
-  ) const;
+	void d_integrate_dq(     //
+			mut_colmat out_q_dq, //
+			const_vec q,         //
+			const_vec v          //
+	) const;
 
-  void d_integrate_dv(     //
-      mut_colmat out_q_dv, //
-      const_vec q,         //
-      const_vec v          //
-  ) const;
+	void d_integrate_dv(     //
+			mut_colmat out_q_dv, //
+			const_vec q,         //
+			const_vec v          //
+	) const;
 
-  void difference(       //
-      mut_vec out_v,     //
-      const_vec q_start, //
-      const_vec q_finish //
-  ) const;
+	void difference(       //
+			mut_vec out_v,     //
+			const_vec q_start, //
+			const_vec q_finish //
+	) const;
 
-  void d_difference_dq_start(    //
-      mut_colmat out_v_dq_start, //
-      const_vec q_start,         //
-      const_vec q_finish         //
-  ) const;
+	void d_difference_dq_start(    //
+			mut_colmat out_v_dq_start, //
+			const_vec q_start,         //
+			const_vec q_finish         //
+	) const;
 
-  void d_difference_dq_finish(    //
-      mut_colmat out_v_dq_finish, //
-      const_vec q_start,          //
-      const_vec q_finish          //
-  ) const;
+	void d_difference_dq_finish(    //
+			mut_colmat out_v_dq_finish, //
+			const_vec q_start,          //
+			const_vec q_finish          //
+	) const;
 
-  // falsy fn_ref means no forces
-  // clang-format off
+	// empty fext_gen means no forces
+	// clang-format off
   auto dynamics_aba(                                                //
       mut_vec out_acceleration,                                     //
       const_vec q,                                                  //
       const_vec v,                                                  //
       const_vec tau,                                                // use a generator for `fext' because
-      option<veg::fn_ref<option<tuple<i64, force<T>>>()>> fext_gen, // pinocchio's aligned vector, and ForceTpl
+      option<fn::fn_view<fn::nothrow<option<tuple<i64, force<T>>>()>>> fext_gen, // pinocchio's aligned vector, and ForceTpl
       key k                                                         // are not visible
   ) const -> key;
-  // clang-format on
+	// clang-format on
 
-  auto inverse_dynamics_rnea(                                       //
-      mut_vec out_tau,                                              //
-      const_vec q,                                                  //
-      const_vec v,                                                  //
-      const_vec a,                                                  //
-      option<veg::fn_ref<option<tuple<i64, force<T>>>()>> fext_gen, //
-      key k                                                         //
-  ) const -> key;
+	auto inverse_dynamics_rnea( //
+			mut_vec out_tau,        //
+			const_vec q,            //
+			const_vec v,            //
+			const_vec a,            //
+			option<fn::fn_view<fn::nothrow<option<tuple<i64, force<T>>>()>>>
+					fext_gen, //
+			key k         //
+	) const -> key;
 
-  auto d_dynamics_aba(                                              //
-      mut_colmat out_acceleration_dq,                               //
-      mut_colmat out_acceleration_dv,                               //
-      mut_colmat out_acceleration_dtau,                             //
-      const_vec q,                                                  //
-      const_vec v,                                                  //
-      const_vec tau,                                                //
-      option<veg::fn_ref<option<tuple<i64, force<T>>>()>> fext_gen, //
-      key k                                                         //
-  ) const -> key;
+	auto d_dynamics_aba(                  //
+			mut_colmat out_acceleration_dq,   //
+			mut_colmat out_acceleration_dv,   //
+			mut_colmat out_acceleration_dtau, //
+			mut_vec out_acceleration,         //
+			const_vec q,                      //
+			const_vec v,                      //
+			const_vec tau,                    //
+			option<fn::fn_view<fn::nothrow<option<tuple<i64, force<T>>>()>>>
+					fext_gen, //
+			key k         //
+	) const -> key;
 
-  auto d_inverse_dynamics_rnea(                                     //
-      mut_colmat out_tau_dq,                                        //
-      mut_colmat out_tau_dv,                                        //
-      mut_colmat out_tau_da,                                        //
-      const_vec q,                                                  //
-      const_vec v,                                                  //
-      const_vec a,                                                  //
-      option<veg::fn_ref<option<tuple<i64, force<T>>>()>> fext_gen, //
-      key k                                                         //
-  ) const -> key;
+	auto d_inverse_dynamics_rnea( //
+			mut_colmat out_tau_dq,    //
+			mut_colmat out_tau_dv,    //
+			mut_colmat out_tau_da,    //
+			const_vec q,              //
+			const_vec v,              //
+			const_vec a,              //
+			option<fn::fn_view<fn::nothrow<option<tuple<i64, force<T>>>()>>>
+					fext_gen, //
+			key k         //
+	) const -> key;
 
-  auto d_contact_dynamics(              //
-      mut_colmat out_acceleration_dq,   //
-      mut_colmat out_acceleration_dv,   //
-      mut_colmat out_acceleration_dtau, //
-      const_vec q,                      //
-      const_vec v,                      //
-      const_vec tau,                    //
-      veg::slice<i64 const> indices,    //
-      i64 n_frames,                     //
-      key k                             //
-  ) const -> key;
+	auto d_contact_dynamics(              //
+			mut_colmat out_acceleration_dq,   //
+			mut_colmat out_acceleration_dv,   //
+			mut_colmat out_acceleration_dtau, //
+			const_vec q,                      //
+			const_vec v,                      //
+			const_vec tau,                    //
+			slice<i64 const> indices,         //
+			i64 n_frames,                     //
+			key k                             //
+	) const -> key;
 
-  auto compute_forward_kinematics(
-      const_vec q, const_vec v, const_vec tau, key k) const -> key;
+	auto compute_forward_kinematics(
+			const_vec q, const_vec v, const_vec tau, key k) const -> key;
 
-  auto compute_forward_dynamics(
-      const_vec q,
-      const_vec v,
-      const_vec tau,
-      const_colmat J,
-      const_vec gamma,
-      T inv_damping,
-      key k) const -> key;
+	auto compute_forward_dynamics(
+			const_vec q,
+			const_vec v,
+			const_vec tau,
+			const_colmat J,
+			const_vec gamma,
+			T inv_damping,
+			key k) const -> key;
 
-  auto compute_frames_forward_kinematics(const_vec q, key k) const -> key;
+	auto compute_frames_forward_kinematics(const_vec q, key k) const -> key;
 
-  auto compute_joint_jacobians(const_vec q, key k) const -> key;
-  auto frame_se3(i64 frame_id, key k) const -> tuple<key, se3<T>>;
-  auto d_frame_se3(mut_colmat out, i64 frame_id, key k) const -> key;
+	auto compute_joint_jacobians(const_vec q, key k) const -> key;
+	auto frame_se3(i64 frame_id, key k) const -> tuple<key, se3<T>>;
+	auto d_frame_se3(mut_colmat out, i64 frame_id, key k) const -> key;
 
-  auto frame_classical_acceleration(i64 frame_id, key k) const
-      -> tuple<key, motion<T>>;
+	auto frame_classical_acceleration(i64 frame_id, key k) const
+			-> tuple<key, motion<T>>;
 
-  auto frame_velocity(i64 frame_id, key k) const -> tuple<key, motion<T>>;
-  auto d_frame_acceleration(
-      mut_colmat dv_dq,
-      mut_colmat da_dq,
-      mut_colmat da_dv,
-      mut_colmat da_da,
-      i64 frame_id,
-      key k) const -> key;
+	auto frame_velocity(i64 frame_id, key k) const -> tuple<key, motion<T>>;
+	auto d_frame_acceleration(
+			mut_colmat dv_dq,
+			mut_colmat da_dq,
+			mut_colmat da_dv,
+			mut_colmat da_da,
+			i64 frame_id,
+			key k) const -> key;
 
-  auto tau_sol(                            //
-      const_vec q,                         //
-      const_vec v,                         //
-      veg::slice<i64 const> frame_indices, //
-      i64 n_frames                         //
-  ) const -> matrix<T, colvec>;
+	auto tau_sol(                       //
+			const_vec q,                    //
+			const_vec v,                    //
+			slice<i64 const> frame_indices, //
+			i64 n_frames                    //
+	) const -> matrix<T, colvec>;
 
-  auto frames_forward_kinematics(const_vec q, key k) const -> key;
+	auto frames_forward_kinematics(const_vec q, key k) const -> key;
 
-  auto frame_coordinates_precompute(const_vec q, key k) const -> key;
-  auto frame_coordinates(mut_vec out, i64 i, key k) const -> key;
-  auto dframe_coordinates_precompute(const_vec q, key k) const -> key;
-  auto d_frame_coordinates(mut_colmat out, i64 i, key k) const -> key;
+	auto frame_coordinates_precompute(const_vec q, key k) const -> key;
+	auto frame_coordinates(mut_vec out, i64 i, key k) const -> key;
+	auto dframe_coordinates_precompute(const_vec q, key k) const -> key;
+	auto d_frame_coordinates(mut_colmat out, i64 i, key k) const -> key;
 
-  auto n_frames() const -> i64;
-  auto frame_name(i64 i) const -> fmt::string_view;
+	auto n_frames() const -> i64;
+	auto frame_name(i64 i) const -> ::fmt::string_view;
 
-  auto kkt_contact_dynamics_matrix_inverse(
-      mut_colmat out, const_colmat J, key k) const -> key;
+	auto kkt_contact_dynamics_matrix_inverse(
+			mut_colmat out, const_colmat J, key k) const -> key;
 
-  static auto skew(const_vec v) -> skew_mat<T>;
+	static auto skew(const_vec v) -> skew_mat<T>;
 };
 
 } // namespace pinocchio

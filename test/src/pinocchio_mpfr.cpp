@@ -4,7 +4,7 @@
 
 namespace mp = boost::multiprecision;
 using scalar = mp::number<
-    mp::backends::mpfr_float_backend<500, mp::allocate_stack>,
-    mp::et_off>;
+		mp::backends::mpfr_float_backend<500, mp::allocate_stack>,
+		mp::et_off>;
 
 template struct ddp::pinocchio::model<scalar>;

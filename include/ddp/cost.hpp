@@ -2,190 +2,215 @@
 #define DDP_PINOCCHIO_COST_HPP_FVE04HDWS
 
 #include "ddp/internal/eigen.hpp"
+#include "veg/internal/prologue.hpp"
 
 namespace ddp {
 
 template <typename T>
 struct quadratic_cost_fixed_size {
-  struct layout {
-    std::vector<T> q;
-    std::vector<T> Q;
-    std::vector<T> r;
-    std::vector<T> R;
+	eigen::heap_matrix<T, colvec> q;
+	eigen::heap_matrix<T, colmat> Q;
+	eigen::heap_matrix<T, colvec> r;
+	eigen::heap_matrix<T, colmat> R;
+	eigen::heap_matrix<T, colvec> rf;
+	eigen::heap_matrix<T, colmat> Rf;
 
-    std::vector<T> rf;
-    std::vector<T> Rf;
-  } self;
+	struct ref_type {
+		eigen::view<T const, colvec> q;
+		eigen::view<T const, colmat> Q;
+		eigen::view<T const, colvec> r;
+		eigen::view<T const, colmat> R;
+		eigen::view<T const, colvec> rf;
+		eigen::view<T const, colmat> Rf;
 
-  auto eval_to_req() const -> mem_req { return {veg::tag<T>, 0}; }
-  auto d_eval_to_req() const -> mem_req {
-    return {
-        veg::tag<T>,
-        veg::narrow<i64>(
-            veg::meta::max_of({self.q.size(), self.r.size(), self.rf.size()}))};
-  }
-  auto dd_eval_to_req() const -> mem_req { return {veg::tag<T>, 0}; }
+		auto eval_req() const -> mem_req { return {tag<T>, 0}; }
+		auto d_eval_to_req() const -> mem_req {
+			return {tag<T>, meta::max_of({q.rows(), r.rows(), rf.rows()})};
+		}
+		auto dd_eval_to_req() const -> mem_req { return {tag<T>, 0}; }
 
-  auto eval_final(view<T const, colvec> x, veg::dynamic_stack_view stack) const
-      -> T {
+		template <typename Key>
+		auto
+		eval_final(view<T const, colvec> x, Key k, dynamic_stack_view stack) const
+				-> tuple<Key, T> {
+			auto nx = rf.rows();
+			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
+			DDP_TMP_VECTOR(stack, tmp, T, nx);
+			eigen::mul_add_to_noalias(tmp, Rf, x);
+			return {elems, VEG_FWD(k), 0.5 * eigen::dot(tmp, x) + eigen::dot(rf, x)};
+		}
 
-    auto nx = veg::narrow<i64>(self.rf.size());
+		template <typename Key>
+		auto d_eval_final_to(
+				view<T, colvec> out_x,
+				view<T const, colvec> x,
+				Key k,
+				dynamic_stack_view stack) const -> Key {
+			auto nx = r.rows();
+			(void)nx, (void)stack;
 
-    VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
+			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
 
-    T out(int(0));
-    {
-      auto _tmp1 = stack.make_new(veg::tag<T>, x.rows()).unwrap();
-      auto tmp1 = eigen::slice_to_vec(_tmp1);
-      eigen::mul_add_to_noalias(tmp1, eigen::slice_to_mat(self.Rf, nx, nx), x);
-      out += eigen::dot(eigen::slice_to_vec(self.rf), x);
-    }
+			eigen::assign(out_x, rf);
+			eigen::mul_add_to_noalias(out_x, Rf, x);
+			return k;
+		}
 
-    return out;
-  }
+		template <typename Key>
+		auto dd_eval_final_to(
+				view<T, colmat> out_xx,
+				view<T const, colvec> x,
+				Key k,
+				dynamic_stack_view stack) const -> Key {
+			auto nx = rf.rows();
+			(void)stack, (void)x;
 
-  void d_eval_final_to(
-      view<T, colvec> out_x,
-      view<T const, colvec> x,
-      veg::dynamic_stack_view stack) const {
+			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
+			eigen::assign(out_xx, Rf);
+			return k;
+		}
 
-    (void)stack;
-    auto nx = veg::narrow<i64>(self.r.size());
+		template <typename Key>
+		auto eval(
+				i64 t,
+				view<T const, colvec> x,
+				view<T const, colvec> u,
+				Key k,
+				dynamic_stack_view stack) const -> tuple<Key, T> {
 
-    VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
+			(void)t;
 
-    eigen::assign(out_x, eigen::slice_to_vec(self.rf));
-    eigen::mul_add_to_noalias(out_x, eigen::slice_to_mat(self.Rf, nx, nx), x);
-  }
+			auto nu = q.rows();
+			auto nx = r.rows();
+			(void)nu, (void)nx;
 
-  void dd_eval_final_to(
-      view<T, colmat> out_xx,
-      view<T const, colvec> x,
-      veg::dynamic_stack_view stack) const {
+			VEG_DEBUG_ASSERT_ALL_OF( //
+					x.rows() == nx,
+					u.rows() == nu);
 
-    (void)stack, (void)x;
-    auto nx = veg::narrow<i64>(self.rf.size());
+			T out(int(0));
+			{
+				DDP_TMP_VECTOR(stack, tmp, T, nx);
+				eigen::mul_add_to_noalias(tmp, R, x);
 
-    VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
-    eigen::assign(out_xx, eigen::slice_to_mat(self.Rf, nx, nx));
-  }
+				out += eigen::dot(tmp, x) / 2;
+				out += eigen::dot(r, x);
+			}
+			{
+				DDP_TMP_VECTOR(stack, tmp, T, nu);
+				eigen::mul_add_to_noalias(tmp, Q, u);
 
-  auto eval(
-      i64 t,
-      view<T const, colvec> x,
-      view<T const, colvec> u,
-      veg::dynamic_stack_view stack) const -> T {
+				out += eigen::dot(eigen::as_const(tmp), u) / 2;
+				out += eigen::dot(q, u);
+			}
+			return {elems, VEG_FWD(k), out};
+		}
 
-    (void)t;
+		template <typename Key>
+		auto d_eval_to(
+				view<T, colvec> out_x,
+				view<T, colvec> out_u,
+				i64 t,
+				view<T const, colvec> x,
+				view<T const, colvec> u,
+				Key k,
+				dynamic_stack_view stack) const -> Key {
 
-    auto nu = veg::narrow<i64>(self.q.size());
-    auto nx = veg::narrow<i64>(self.r.size());
+			(void)stack, (void)t;
 
-    VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx, u.rows() == nu);
+			auto nu = q.rows();
+			auto nx = r.rows();
+			(void)nu, (void)nx;
 
-    T out(int(0));
-    {
-      auto _tmp1 = stack.make_new(veg::tag<T>, x.rows()).unwrap();
-      auto tmp1 = eigen::slice_to_vec(_tmp1);
-      eigen::mul_add_to_noalias(tmp1, eigen::slice_to_mat(self.R, nx, nx), x);
+			VEG_DEBUG_ASSERT_ALL_OF( //
+					x.rows() == nx,
+					u.rows() == nu,
+					out_u.rows() == nu,
+					out_x.rows() == nx);
 
-      out += eigen::dot(eigen::as_const(tmp1), x) / 2;
-      out += eigen::dot(eigen::slice_to_vec(self.r), x);
-    }
-    {
-      auto _tmp1 = stack.make_new(veg::tag<T>, u.rows()).unwrap();
-      auto tmp1 = eigen::slice_to_vec(_tmp1);
-      eigen::mul_add_to_noalias(tmp1, eigen::slice_to_mat(self.Q, nu, nu), u);
+			eigen::assign(out_x, r);
+			eigen::assign(out_u, q);
+			eigen::mul_add_to_noalias(out_x, R, x);
+			eigen::mul_add_to_noalias(out_u, Q, u);
+			return k;
+		}
 
-      out += eigen::dot(eigen::as_const(tmp1), u) / 2;
-      out += eigen::dot(eigen::slice_to_vec(self.q), u);
-    }
-    return out;
-  }
+		template <typename Key>
+		auto dd_eval_to(
+				view<T, colmat> out_xx,
+				view<T, colmat> out_ux,
+				view<T, colmat> out_uu,
+				i64 t,
+				view<T const, colvec> x,
+				view<T const, colvec> u,
+				Key k,
+				dynamic_stack_view stack) const -> Key {
 
-  void d_eval_to(
-      view<T, colvec> out_x,
-      view<T, colvec> out_u,
-      i64 t,
-      view<T const, colvec> x,
-      view<T const, colvec> u,
-      veg::dynamic_stack_view stack) const {
+			(void)t, (void)x, (void)u, (void)stack;
 
-    (void)stack, (void)t;
+			auto nu = q.rows();
+			auto nx = r.rows();
+			(void)nu, (void)nx;
 
-    auto nu = veg::narrow<i64>(self.q.size());
-    auto nx = veg::narrow<i64>(self.r.size());
+			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx, u.rows() == nu);
 
-    VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx, u.rows() == nu);
+			eigen::assign(out_xx, R);
+			eigen::assign(out_uu, Q);
+			out_ux.setZero();
+			return k;
+		}
+	};
 
-    eigen::assign(out_x, eigen::slice_to_vec(self.r));
-    eigen::assign(out_u, eigen::slice_to_vec(self.q));
-    eigen::mul_add_to_noalias(out_x, eigen::slice_to_mat(self.R, nx, nx), x);
-    eigen::mul_add_to_noalias(out_u, eigen::slice_to_mat(self.Q, nu, nu), u);
-  }
-
-  void dd_eval_to(
-      view<T, colmat> out_xx,
-      view<T, colmat> out_ux,
-      view<T, colmat> out_uu,
-      i64 t,
-      view<T const, colvec> x,
-      view<T const, colvec> u,
-      veg::dynamic_stack_view stack) const {
-
-    (void)t, (void)x, (void)u, (void)stack;
-
-    auto nu = veg::narrow<i64>(self.q.size());
-    auto nx = veg::narrow<i64>(self.r.size());
-
-    VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx, u.rows() == nu);
-
-    eigen::assign(out_xx, eigen::slice_to_mat(self.R, nx, nx));
-    eigen::assign(out_uu, eigen::slice_to_mat(self.Q, nu, nu));
-    out_ux.setZero();
-  }
+	template <typename Dynamics>
+	auto ref(Dynamics const& /*unused*/) noexcept -> ref_type {
+		return {
+				q.get(),
+				Q.get(),
+				r.get(),
+				R.get(),
+				rf.get(),
+				Rf.get(),
+		};
+	}
 };
 
 namespace make {
 namespace fn {
 struct quadratic_cost_fixed_size_fn {
-  template <typename MatV, typename T = typename MatV::Scalar>
-  auto operator()(
-      MatV q,
-      eigen::view<T const, colmat> Q,
-      eigen::view<T const, colvec> r,
-      eigen::view<T const, colmat> R,
-      eigen::view<T const, colvec> rf,
-      eigen::view<T const, colmat> Rf) const -> quadratic_cost_fixed_size<T> {
-    auto nq = q.size();
-    auto nr = r.size();
-    (void)nq, (void)nr;
-    VEG_DEBUG_ASSERT_ALL_OF(
-        Q.rows() == nq,
-        Q.cols() == nq,
-        R.rows() == nr,
-        R.cols() == nr,
-        rf.rows() == nr,
-        Rf.rows() == nr);
+	template <typename T>
+	auto operator()(
+			eigen::heap_matrix<T, colvec> q,
+			eigen::heap_matrix<T, colmat> Q,
+			eigen::heap_matrix<T, colvec> r,
+			eigen::heap_matrix<T, colmat> R,
+			eigen::heap_matrix<T, colvec> rf,
+			eigen::heap_matrix<T, colmat> Rf) const -> quadratic_cost_fixed_size<T> {
+		auto nq = q.get().rows();
+		auto nr = r.get().rows();
+		(void)nq, (void)nr;
+		VEG_DEBUG_ASSERT_ALL_OF(
+				Q.get().rows() == nq,
+				Q.get().cols() == nq,
+				R.get().rows() == nr,
+				R.get().cols() == nr,
+				rf.get().rows() == nr,
+				Rf.get().rows() == nr);
 
-    auto to_vec = [](auto const& v) {
-      return std::vector<T>(v.data(), v.data() + v.size());
-    };
-
-    return {{
-        to_vec(q),
-        to_vec(Q),
-        to_vec(r),
-        to_vec(R),
-        to_vec(rf),
-        to_vec(Rf),
-    }};
-  }
+		return {
+				VEG_FWD(q),
+				VEG_FWD(Q),
+				VEG_FWD(r),
+				VEG_FWD(R),
+				VEG_FWD(rf),
+				VEG_FWD(Rf),
+		};
+	}
 };
 } // namespace fn
-__VEG_ODR_VAR(quadratic_cost_fixed_size, fn::quadratic_cost_fixed_size_fn);
+VEG_INLINE_VAR(quadratic_cost_fixed_size, fn::quadratic_cost_fixed_size_fn);
 } // namespace make
 
 } // namespace ddp
 
+#include "veg/internal/epilogue.hpp"
 #endif /* end of include guard DDP_PINOCCHIO_COST_HPP_FVE04HDWS */
