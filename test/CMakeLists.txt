@@ -33,9 +33,18 @@ macro(ddp_test_config name)
     ddp-pinocchio
     backward_cpp_main
     pinocchio_double
+    pinocchio_mpfr
   )
 endmacro()
 
-ddp_test_config(lqr)
+target_compile_options(test.lqr PUBLIC -g -fno-omit-frame-pointer)
+target_link_options(
+  test.lqr
+  PUBLIC
+  -g
+  -fno-omit-frame-pointer
+)
+target_link_libraries(test.lqr ddp-pinocchio backward_cpp_main)
+
 ddp_test_config(ur5)
 ddp_test_config(ur5.terminal)

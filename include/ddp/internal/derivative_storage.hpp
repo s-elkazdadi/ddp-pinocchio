@@ -7,7 +7,7 @@
 #include "ddp/dynamics.hpp"
 #include "ddp/constraint.hpp"
 #include "ddp/trajectory.hpp"
-#include "veg/timer.hpp"
+#include "veg/util/timer.hpp"
 #include <omp.h>
 #include "veg/internal/prologue.hpp"
 
@@ -173,7 +173,7 @@ void compute_first_derivatives(
 		Dynamics const& dynamics,
 		Constraint const& constraint,
 		Traj const& traj,
-		dynamic_stack_view stack) {
+		DynStackView stack) {
 
 	cost.d_eval_final_to(derivs.lfx(), traj.x_f(), stack);
 
@@ -279,12 +279,13 @@ auto compute_second_derivatives(
 		Dynamics const& dynamics,
 		Constraint const& constraint,
 		trajectory<T> const& traj,
-		dynamic_stack_view stack,
+		DynStackView stack,
 		bool multithread) -> i64 {
 	i64 nanosec{};
 	{
-		auto fn = [&](i64 duration) noexcept { nanosec = duration; };
-		time::raii_timer timer{fn};
+		auto&& _ =
+				time::raii_timer([&](i64 duration) noexcept { nanosec = duration; });
+		unused(_);
 
 		auto const& _lx = derivs.first_order_derivatives<T>::self.lx;
 		i64 const begin = _lx.index_begin();
@@ -301,7 +302,7 @@ auto compute_second_derivatives(
 		} else {
 			auto const n_threads = internal::n_threads();
 
-			option<dynstack_array<storage_for<T>>> stack_buffers[max_threads];
+			Option<DynStackArray<storage_for<T>>> stack_buffers[max_threads];
 
 			{
 				i64 stack_len = stack.remaining_bytes() / n_threads / i64(sizeof(T));
@@ -323,8 +324,8 @@ auto compute_second_derivatives(
 				i64 const thread_num = omp_get_thread_num();
 				VEG_ASSERT(thread_num < internal::n_threads());
 
-				dynamic_stack_view thread_stack = {
-						make::slice(stack_buffers[omp_get_thread_num()].as_ref().unwrap())};
+				DynStackView thread_stack = {
+						slice(stack_buffers[omp_get_thread_num()].as_ref().unwrap())};
 
 				if (thread_num == 0) {
 					k = cost.d_eval_final_to(derivs.lfx(), traj.x_f(), VEG_FWD(k), stack);
@@ -363,7 +364,7 @@ auto compute_second_derivatives_one_iter(
 		trajectory<T> const& traj,
 		i64 t,
 		typename Dynamics::key k,
-		dynamic_stack_view stack) -> typename Dynamics::key {
+		DynStackView stack) -> typename Dynamics::key {
 
 	VEG_BIND(auto, (x, u), traj[t]);
 

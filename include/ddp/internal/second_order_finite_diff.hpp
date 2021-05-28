@@ -2,7 +2,7 @@
 #define DDP_PINOCCHIO_SECOND_ORDER_FINITE_DIFF_HPP_LNCEGZXSS
 
 #include "ddp/internal/tensor.hpp"
-#include "veg/timer.hpp"
+#include "veg/util/timer.hpp"
 
 namespace ddp {
 
@@ -28,12 +28,12 @@ auto second_order_deriv_1(
 		view<T const, colvec> x,
 		view<T const, colvec> u,
 		Key k,
-		dynamic_stack_view stack) -> Key {
+		DynStackView stack) -> Key {
 
 	auto odim = out_xx.outdim();
 	auto xdim = out_xx.indiml();
 	auto udim = out_ux.indiml();
-	(void)odim, (void)xdim, (void)udim;
+	unused(odim, xdim, udim);
 
 	VEG_DEBUG_ASSERT(out_xx.outdim() == odim);
 	VEG_DEBUG_ASSERT(out_xx.indiml() == xdim);
@@ -162,7 +162,7 @@ auto second_order_deriv_2(
 		view<T const, colvec> x,
 		view<T const, colvec> u,
 		typename Fn::key k,
-		dynamic_stack_view stack) -> typename Fn::key {
+		DynStackView stack) -> typename Fn::key {
 
 	auto no = out_x.rows();
 	auto nx = out_x.cols();
@@ -197,7 +197,7 @@ auto second_order_deriv_2(
 
 			T& in_var = at_x ? dx[idx] : du[idx];
 			auto f_col = at_x ? eigen::as_const(out_x.col(idx))
-												: eigen::as_const(out_u.col(idx));
+			                  : eigen::as_const(out_u.col(idx));
 			auto tensor = at_x ? out_xx : out_uu;
 
 			in_var = eps;
@@ -233,12 +233,12 @@ auto second_order_deriv_2(
 
 			T& in_var_1 = at_x_1 ? dx[idx_1] : du[idx_1];
 			auto f_col_1 = at_x_1 //
-												 ? eigen::as_const(out_x.col(idx_1))
-												 : eigen::as_const(out_u.col(idx_1));
+			                   ? eigen::as_const(out_x.col(idx_1))
+			                   : eigen::as_const(out_u.col(idx_1));
 
 			auto tensor_1 = at_x_1 //
-													? out_xx
-													: out_uu;
+			                    ? out_xx
+			                    : out_uu;
 
 			in_var_1 = eps;
 
@@ -248,12 +248,13 @@ auto second_order_deriv_2(
 
 				T& in_var_2 = at_x_2 ? dx[idx_2] : du[idx_2];
 				auto f_col_2 = at_x_2 ? eigen::as_const(out_x.col(idx_2))
-															: eigen::as_const(out_u.col(idx_2));
+				                      : eigen::as_const(out_u.col(idx_2));
 
 				auto tensor_2 = at_x_2 ? out_xx : out_uu;
 
-				auto tensor = at_x_1 ? (at_x_2 ? out_xx : out_ux)
-														 : (at_x_2 ? (VEG_ASSERT(false), out_uu) : out_uu);
+				auto tensor =
+						at_x_1 ? (at_x_2 ? out_xx : out_ux)
+									 : (at_x_2 ? (VEG_DEBUG_ASSERT(false), out_uu) : out_uu);
 
 				in_var_2 = eps;
 

@@ -13,7 +13,7 @@ auto check_eval_to(
 		i64 t,
 		view<typename U::scalar const, colvec> x,
 		view<typename U::scalar const, colvec> u) noexcept {
-	(void)self, (void)out, (void)t, (void)x, (void)u;
+	unused(self, out, t, x, u);
 
 	VEG_DEBUG_ASSERT_ALL_OF( //
 			(x.rows() == self.state_space().dim(t)),
@@ -29,7 +29,7 @@ auto check_d_eval_to(
 		i64 t,
 		view<typename U::scalar const, colvec> x,
 		view<typename U::scalar const, colvec> u) noexcept {
-	(void)self, (void)out_x, (void)out_u, (void)out, (void)t, (void)x, (void)u;
+	unused(self, out_x, out_u, out, t, x, u);
 
 	VEG_DEBUG_ASSERT_ALL_OF( //
 			(x.rows() == self.state_space().dim(t)),
@@ -53,7 +53,9 @@ struct no_constraint {
 			return dynamics_ref;
 		}
 
-		auto output_space() const VEG_DEDUCE_RET(vector_space<scalar>{{0}});
+		auto output_space() const noexcept -> vector_space<scalar> {
+			return vector_space<scalar>{0};
+		}
 		auto state_space() const VEG_DEDUCE_RET(dynamics().state_space());
 		auto control_space() const VEG_DEDUCE_RET(dynamics().control_space());
 
@@ -65,8 +67,8 @@ struct no_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
-			(void)k, (void)stack;
+				DynStackView stack) const -> key {
+			unused(k, stack);
 			ddp::check_eval_to(*this, out, t, x, u);
 
 			return k;
@@ -82,9 +84,9 @@ struct no_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 
-			(void)k, (void)stack;
+			unused(k, stack);
 			ddp::check_d_eval_to(*this, out_x, out_u, out, t, x, u);
 
 			return k;
@@ -113,15 +115,18 @@ struct config_constraint {
 			return dynamics_ref;
 		}
 
-		auto dim(i64 t) const -> i64 {
-			dynamic_stack_view stack{slice<char>{nullptr, 0}};
-			return constraint_ref.target_generator(t, stack).rows();
+		struct dim_fn {
+			Fn const& gen;
+			auto operator()(i64 t) const noexcept -> i64 {
+				DynStackView stack{Slice<char>{nullptr, 0}};
+				return gen(t, stack).rows();
+			}
+		};
+
+		auto output_space() const noexcept -> basic_vector_space<scalar, dim_fn> {
+			return {{{constraint_ref.target_generator}, constraint_ref.max_dim}};
 		}
-		auto max_dim() const -> i64 { return constraint_ref.max_dim; }
-		auto output_space() const noexcept
-				-> vector_space_from_parent<scalar, ref_type> {
-			return {*this};
-		}
+
 		auto state_space() const VEG_DEDUCE_RET(dynamics().state_space());
 		auto control_space() const VEG_DEDUCE_RET(dynamics().control_space());
 
@@ -135,8 +140,8 @@ struct config_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
-			(void)u;
+				DynStackView stack) const -> key {
+			unused(u);
 			ddp::check_eval_to(*this, out, t, x, u);
 
 			auto _target = constraint_ref.target_generator(t, stack);
@@ -161,9 +166,8 @@ struct config_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 
-			(void)u;
 			ddp::check_d_eval_to(*this, out_x, out_u, out, t, x, u);
 
 			auto _target = constraint_ref.target_generator(t, stack);
@@ -180,7 +184,7 @@ struct config_constraint {
 			auto xq = eigen::split_at_row(x, nq)[0_c];
 
 			VEG_BIND(auto, (out_xq, out_xv), eigen::split_at_col(out_x, nv));
-			(void)out_xv;
+			unused(u, out_xv);
 
 			out_x.setZero();
 			out_u.setZero();
@@ -200,6 +204,7 @@ struct config_constraint {
 template <typename Dynamics, typename Fn>
 struct velocity_constraint {
 	Fn target_generator;
+	i64 max_dim;
 	mem_req generator_mem_req;
 
 	struct ref_type {
@@ -207,18 +212,28 @@ struct velocity_constraint {
 		using scalar = typename Dynamics::scalar;
 
 		typename Dynamics::ref_type dynamics_ref;
-		velocity_constraint const& constraint;
+		velocity_constraint const& constraint_ref;
 
 		auto dynamics() const -> typename Dynamics::ref_type { return dynamics; }
 
-		auto output_space() const noexcept
-				-> vector_space_from_parent<scalar, ref_type> {
-			return {*this};
+		struct dim_fn {
+			Fn const& gen;
+			auto operator()(i64 t) const noexcept -> i64 {
+				DynStackView stack{Slice<char>{nullptr, 0}};
+				return gen(t, stack).rows();
+			}
+		};
+
+		auto output_space() const noexcept -> basic_vector_space<scalar, dim_fn> {
+			return {{constraint_ref.target_generator, constraint_ref.max_dim}};
 		}
+
 		auto state_space() const VEG_DEDUCE_RET(dynamics().state_space());
 		auto control_space() const VEG_DEDUCE_RET(dynamics().control_space());
 
-		auto eval_to_req() const -> mem_req { return constraint.generator_mem_req; }
+		auto eval_to_req() const -> mem_req {
+			return constraint_ref.generator_mem_req;
+		}
 
 		auto eval_to(
 				view<scalar, colvec> out,
@@ -226,10 +241,10 @@ struct velocity_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 			ddp::check_eval_to(*this, out, t, x, u);
 
-			auto _target = constraint.target_generator(t, stack);
+			auto _target = constraint_ref.target_generator(t, stack);
 			auto target = eigen::slice_to_vec(_target);
 
 			if (target.rows() == 0) {
@@ -238,7 +253,7 @@ struct velocity_constraint {
 
 			VEG_DEBUG_ASSERT(target.rows() == dynamics().model.tangent_dim());
 
-			(void)u;
+			unused(u);
 			auto nq = dynamics().model.config_dim();
 
 			eigen::sub_to(out, target, eigen::split_at_row(x, nq)[1_c]);
@@ -256,10 +271,10 @@ struct velocity_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 			ddp::check_d_eval_to(*this, out_x, out_u, out, t, x, u);
 
-			auto _target = constraint.target_generator(t, stack);
+			auto _target = constraint_ref.target_generator(t, stack);
 			auto target = eigen::slice_to_vec(_target);
 
 			if (target.rows() == 0) {
@@ -268,7 +283,7 @@ struct velocity_constraint {
 
 			VEG_DEBUG_ASSERT(target.rows() == dynamics().model.tangent_dim());
 
-			(void)u;
+			unused(u);
 			auto nq = dynamics().model.config_dim();
 			auto nv = dynamics().model.tangent_dim();
 
@@ -298,26 +313,29 @@ struct spatial_constraint {
 
 		typename Dynamics::ref_type dynamics_ref;
 		Fn const& target_generator;
-		i64 max_dim_;
+		i64 max_dim;
 		mem_req generator_mem_req;
-		slice<i64 const> frame_ids;
+		Slice<i64 const> frame_ids;
 
 		auto dynamics() const -> typename Dynamics::ref_type {
 			return dynamics_ref;
 		}
 
-		auto dim(i64 t) const -> i64 {
-			dynamic_stack_view stack{slice<char>{nullptr, 0}};
-			i64 dim = 0;
-			for (i64 i = 0; i < frame_ids.size(); ++i) {
-				dim += target_generator(i, t, stack).rows();
+		struct dim_fn {
+			Fn const& gen;
+			Slice<i64 const> frame_ids;
+			auto operator()(i64 t) const noexcept -> i64 {
+				DynStackView stack{Slice<char>{nullptr, 0}};
+				i64 dim = 0;
+				for (i64 i = 0; i < frame_ids.size(); ++i) {
+					dim += gen(i, t, stack).rows();
+				}
+				return dim;
 			}
-			return dim;
-		}
-		auto max_dim() const -> i64 { return max_dim_; }
-		auto output_space() const noexcept
-				-> vector_space_from_parent<scalar, ref_type> {
-			return {*this};
+		};
+
+		auto output_space() const noexcept -> basic_vector_space<scalar, dim_fn> {
+			return {{{target_generator, frame_ids}, max_dim}};
 		}
 		auto state_space() const VEG_DEDUCE_RET(dynamics().state_space());
 		auto control_space() const VEG_DEDUCE_RET(dynamics().control_space());
@@ -331,12 +349,11 @@ struct spatial_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 			ddp::check_eval_to(*this, out, t, x, u);
 
 			auto nq = dynamics().model.config_dim();
 			VEG_BIND(auto, (q, v), eigen::split_at_row(x, nq));
-			(void)u, (void)v;
 			bool computed = false;
 
 			for (i64 i = 0; i < frame_ids.size(); ++i) {
@@ -349,8 +366,7 @@ struct spatial_constraint {
 
 				VEG_BIND(auto, (out_head, out_tail), eigen::split_at_row(out, 3 * i));
 				VEG_BIND(auto, (out_3, out_rest), eigen::split_at_row(out_tail, 3));
-				(void)out_head;
-				(void)out_rest;
+				unused(u, v, out_head, out_rest);
 
 				if (!computed) {
 					k = dynamics().model.frame_coordinates_precompute(q, VEG_FWD(k));
@@ -373,14 +389,13 @@ struct spatial_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 
 			ddp::check_d_eval_to(*this, out_x, out_u, out, t, x, u);
 
 			auto nq = dynamics().model.config_dim();
 			auto nv = dynamics().model.tangent_dim();
 			VEG_BIND(auto, (q, v), eigen::split_at_row(x, nq));
-			(void)u, (void)v;
 			out_u.setZero();
 
 			bool computed = false;
@@ -398,14 +413,9 @@ struct spatial_constraint {
 				VEG_BIND(
 						auto, (out_3x, out_rest_x), eigen::split_at_row(out_tail_x, 3));
 				VEG_BIND(auto, (out_3, out_rest), eigen::split_at_row(out_tail, 3));
-				(void)out_head;
-				(void)out_rest;
-				(void)out_head_x;
-				(void)out_rest_x;
+				unused(u, v, out_head, out_rest, out_head_x, out_rest_x);
 
 				VEG_BIND(auto, (out_3q, out_3v), eigen::split_at_col(out_3x, nv));
-
-				(void)v;
 
 				if (!computed) {
 					k = dynamics().model.dframe_coordinates_precompute(q, VEG_FWD(k));
@@ -442,12 +452,17 @@ struct constraint_advance_time {
 
 		auto dynamics() const VEG_DEDUCE_RET(constr.dynamics());
 
+		struct dim_fn {
+			typename Constraint::ref_type constr;
+			auto operator()(i64 t) const noexcept -> i64 {
+				return constr.output_space().dim(t + 1);
+			}
+		};
+		auto output_space() const noexcept -> basic_vector_space<scalar, dim_fn> {
+			return {{{constr}, constr.output_space().max_dim()}};
+		}
 		auto state_space() const VEG_DEDUCE_RET(constr.state_space());
 		auto control_space() const VEG_DEDUCE_RET(constr.control_space());
-		auto output_space() const noexcept
-				-> vector_space_from_parent<scalar, ref_type> {
-			return {*this};
-		}
 
 		auto dim(i64 t) const -> i64 { return constr.dim(t + 1); }
 		auto max_dim() const -> i64 { return constr.max_dim(); }
@@ -468,11 +483,11 @@ struct constraint_advance_time {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 			ddp::check_eval_to(*this, out, t, x, u);
 
 			auto nde = output_space().ddim(t);
-			(void)nde;
+			unused(nde);
 			VEG_DEBUG_ASSERT(out.rows() == nde);
 			if (nde == 0) {
 				return k;
@@ -518,7 +533,7 @@ struct constraint_advance_time {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 
 			auto nx = dynamics().output_space().dim(t);
 			auto ndx = dynamics().output_space().ddim(t);
@@ -606,7 +621,7 @@ struct concat_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 
 			VEG_BIND(
 					auto,
@@ -634,7 +649,7 @@ struct concat_constraint {
 				view<scalar const, colvec> x,
 				view<scalar const, colvec> u,
 				key k,
-				dynamic_stack_view stack) const -> key {
+				DynStackView stack) const -> key {
 
 			VEG_BIND(
 					auto,
@@ -701,7 +716,7 @@ VEG_INLINE_VAR(config_constraint, fn::config_constraint);
 namespace {
 template <i64 N>
 constexpr auto const& constraint_advance_time =
-		meta::internal::static_const<fn::constraint_advance_time<N>>::value;
+		meta::static_const<fn::constraint_advance_time<N>>::value;
 } // namespace
 } // namespace make
 

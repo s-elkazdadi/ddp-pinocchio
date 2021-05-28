@@ -27,11 +27,11 @@ struct trajectory {
 	auto index_end() const -> i64 { return self.u.index_end(); }
 
 	auto operator[](i64 t) const
-			-> tuple<view<T const, colvec>, view<T const, colvec>> {
-		return {elems, self.x[t], self.u[t]};
+			-> Tuple<view<T const, colvec>, view<T const, colvec>> {
+		return {direct, self.x[t], self.u[t]};
 	}
-	auto operator[](i64 t) -> tuple<view<T, colvec>, view<T, colvec>> {
-		return {elems, self.x[t], self.u[t]};
+	auto operator[](i64 t) -> Tuple<view<T, colvec>, view<T, colvec>> {
+		return {direct, self.x[t], self.u[t]};
 	}
 	auto x(i64 t) -> view<T, colvec> { return {self.x[t]}; }
 	auto x(i64 t) const -> view<T const, colvec> { return {self.x[t]}; }

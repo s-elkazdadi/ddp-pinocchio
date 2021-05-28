@@ -9,7 +9,140 @@
 #include "veg/internal/prologue.hpp"
 
 namespace ddp {
+
 namespace eigen {
+namespace internal {
+template <typename T>
+using mat_scalar_t = typename T::Scalar;
+template <typename T>
+using mat_rows_t = veg::meta::constant<i64, i64(T::RowsAtCompileTime)>;
+template <typename T>
+using mat_cols_t = veg::meta::constant<i64, i64(T::ColsAtCompileTime)>;
+} // namespace internal
+
+template <typename T>
+using scalar_t = veg::meta::detected_t<internal::mat_scalar_t, T>;
+template <typename T>
+using rows_t =
+		veg::meta::detected_or_t<meta::constant<i64, 0>, internal::mat_rows_t, T>;
+template <typename T>
+using cols_t =
+		veg::meta::detected_or_t<meta::constant<i64, 0>, internal::mat_cols_t, T>;
+} // namespace eigen
+
+namespace internal {
+
+template <typename A, typename B>
+using add_expr = decltype(VEG_DECLVAL(A &&) + VEG_DECLVAL(B &&));
+template <typename A, typename B>
+using sub_expr = decltype(VEG_DECLVAL(A &&) - VEG_DECLVAL(B &&));
+template <typename A, typename B>
+using mul_expr = decltype(VEG_DECLVAL(A &&) * VEG_DECLVAL(B &&));
+template <typename A, typename B>
+using div_expr = decltype(VEG_DECLVAL(A &&) / VEG_DECLVAL(B &&));
+
+template <typename T>
+using neg_expr = decltype(-VEG_DECLVAL(T &&));
+
+template <typename T>
+using data_expr = decltype(VEG_DECLVAL(T &&).data());
+template <typename T>
+using size_expr = decltype(VEG_DECLVAL(T &&).size());
+
+} // namespace internal
+
+namespace concepts {
+namespace aux {
+
+DDP_DEF_CONCEPT(
+		typename T, has_data, VEG_CONCEPT(detected<internal::data_expr, T&>));
+DDP_DEF_CONCEPT(
+		typename T, has_size, VEG_CONCEPT(detected<internal::size_expr, T&>));
+
+DDP_DEF_CONCEPT(
+		(typename A), negatable, VEG_CONCEPT(detected<internal::neg_expr, A&&>));
+DDP_DEF_CONCEPT(
+		(typename A, typename B),
+		addable,
+		VEG_CONCEPT(detected<internal::add_expr, A&&, B&&>));
+DDP_DEF_CONCEPT(
+		(typename A, typename B),
+		subtractible,
+		VEG_CONCEPT(detected<internal::sub_expr, A&&, B&&>));
+DDP_DEF_CONCEPT(
+		(typename A, typename B),
+		multipliable,
+		VEG_CONCEPT(detected<internal::mul_expr, A&&, B&&>));
+DDP_DEF_CONCEPT(
+		(typename A, typename B),
+		divisible,
+		VEG_CONCEPT(detected<internal::div_expr, A&&, B&&>));
+} // namespace aux
+
+DDP_DEF_CONCEPT_CONJUNCTION(
+		typename T,
+		scalar,
+		(
+
+				(veg::concepts::, constructible<T>),
+				(veg::concepts::, copy_constructible<T>),
+				(veg::concepts::, move_constructible<T>),
+				(veg::concepts::, copy_assignable<T>),
+				(veg::concepts::, move_assignable<T>),
+
+				(veg::concepts::, constructible<T, int>),
+				(veg::concepts::, constructible<T, double>),
+				(veg::concepts::, assignable<T&, int>),
+				(veg::concepts::, assignable<T&, double>),
+
+				(aux::, negatable<T const&>),
+				(aux::, addable<T const&, T const&>),
+				(aux::, subtractible<T const&, T const&>),
+				(aux::, multipliable<T const&, T const&>),
+				(aux::, divisible<T const&, T const&>),
+				(aux::, multipliable<T const&, int>),
+				(aux::, divisible<T const&, int>)
+
+						));
+
+namespace eigen {
+namespace aux {
+
+DDP_DEF_CONCEPT(
+		typename T,
+		has_eigen_base,
+		VEG_CONCEPT(convertible<T, Eigen::MatrixBase<T>>));
+
+DDP_DEF_CONCEPT(
+		typename M, has_scalar, DDP_CONCEPT(scalar<typename M::Scalar>));
+
+DDP_DEF_CONCEPT(
+		(typename N, typename M),
+		maybe_same,
+		((M::value == N::value) || (N::value == Eigen::Dynamic) ||
+     (M::value == Eigen::Dynamic)));
+
+} // namespace aux
+
+DDP_DEF_CONCEPT_CONJUNCTION(
+		typename T, matrix, ((aux::, has_eigen_base<T>), (aux::, has_scalar<T>)));
+
+DDP_DEF_CONCEPT_CONJUNCTION(
+		typename T,
+		vector,
+		((, matrix<T>),
+     (veg::concepts::,
+      same<ddp::eigen::cols_t<T>, veg::meta::constant<i64, 1>>)));
+
+} // namespace eigen
+} // namespace concepts
+
+namespace eigen {
+
+template <typename T>
+using member_data_t = meta::detected_t<ddp::internal::data_expr, T>;
+template <typename T>
+using member_size_t = meta::detected_t<ddp::internal::size_expr, T>;
 
 enum struct kind { colvec, colmat, rowvec, rowmat };
 
@@ -35,7 +168,7 @@ auto format_impl(
 		::fmt::basic_format_context<OutIt, char>& fc,
 		i64 rows,
 		i64 cols,
-		fn::fn_view<fn::nothrow<T(i64, i64)>> getter,
+		fn::FnView<T(i64, i64)> getter,
 		fmt_formatter<T>& fmt) -> decltype(fc.out()) {
 	auto out = fc.out();
 
@@ -53,7 +186,7 @@ auto format_impl(
 			multi ? "{\n" : "{");
 
 	i64 line_len = multi ? 0
-											 : narrow<i64>(::fmt::formatted_size(
+	                     : narrow<i64>(::fmt::formatted_size(
 														 "[xxx|{:>2}×{:<2}] x", rows, cols));
 
 	char const* row_sep = "";
@@ -113,7 +246,7 @@ extern template auto ddp::eigen::internal::format_impl(
 				fc,
 		i64 rows,
 		i64 cols,
-		fn::fn_view<fn::nothrow<float(i64, i64)>> getter,
+		fn::FnView<float(i64, i64)> getter,
 		fmt_formatter<float>& fmt) -> decltype(fc.out());
 
 extern template auto ddp::eigen::internal::format_impl(
@@ -121,7 +254,7 @@ extern template auto ddp::eigen::internal::format_impl(
 				fc,
 		i64 rows,
 		i64 cols,
-		fn::fn_view<fn::nothrow<double(i64, i64)>> getter,
+		fn::FnView<double(i64, i64)> getter,
 		fmt_formatter<double>& fmt) -> decltype(fc.out());
 
 extern template auto ddp::eigen::internal::format_impl(
@@ -129,7 +262,7 @@ extern template auto ddp::eigen::internal::format_impl(
 				fc,
 		i64 rows,
 		i64 cols,
-		fn::fn_view<fn::nothrow<long double(i64, i64)>> getter,
+		fn::FnView<long double(i64, i64)> getter,
 		fmt_formatter<long double>& fmt) -> decltype(fc.out());
 
 template <typename T>
@@ -193,7 +326,7 @@ struct dyn_cast_impl<matrix, K> {
 	template <typename T>
 	static auto apply(T& mat) -> matrix<typename T::Scalar, K> {
 		if (K == kind::colvec) {
-			VEG_ASSERT(mat.cols() == 1);
+			VEG_DEBUG_ASSERT(mat.cols() == 1);
 		}
 		return mat;
 	}
@@ -206,7 +339,7 @@ struct dyn_cast_impl<view, kind::colvec> {
 			-> view<std::remove_pointer_t<decltype(mat.data())>, kind::colvec> {
 		static_assert(!T::IsRowMajor, "");
 
-		VEG_ASSERT_ALL_OF((mat.innerStride() == 1), (mat.cols() == 1));
+		VEG_DEBUG_ASSERT_ALL_OF((mat.innerStride() == 1), (mat.cols() == 1));
 		return {mat.data(), mat.rows(), 1, mat.outerStride()};
 	}
 };
@@ -218,7 +351,7 @@ struct dyn_cast_impl<view, kind::rowvec> {
 			-> view<std::remove_pointer_t<decltype(mat.data())>, kind::rowvec> {
 		static_assert(T::IsRowMajor, "");
 
-		VEG_ASSERT_ALL_OF((mat.innerStride() == 1), (mat.rows() == 1));
+		VEG_DEBUG_ASSERT_ALL_OF((mat.innerStride() == 1), (mat.rows() == 1));
 		return {mat.data(), 1, mat.cols(), mat.outerStride()};
 	}
 };
@@ -230,7 +363,7 @@ struct dyn_cast_impl<view, kind::colmat> {
 			-> view<std::remove_pointer_t<decltype(mat.data())>, kind::colmat> {
 		static_assert(!T::IsRowMajor, "");
 
-		VEG_ASSERT(mat.innerStride() == 1);
+		VEG_DEBUG_ASSERT(mat.innerStride() == 1);
 		return {mat.data(), mat.rows(), mat.cols(), mat.outerStride()};
 	}
 };
@@ -242,7 +375,7 @@ struct dyn_cast_impl<view, kind::rowmat> {
 			-> view<std::remove_pointer_t<decltype(mat.data())>, kind::rowmat> {
 		static_assert(T::IsRowMajor, "");
 
-		VEG_ASSERT(mat.innerStride() == 1);
+		VEG_DEBUG_ASSERT(mat.innerStride() == 1);
 		return {mat.data(), mat.rows(), mat.cols(), mat.outerStride()};
 	}
 };
@@ -264,100 +397,9 @@ auto element_ptr_impl(
 
 template <typename T>
 auto element_ptr(T const& mat, i64 i, i64 j) -> typename T::Scalar* {
-	return (element_ptr_impl)(
-			mat.data(), i, j, mat.outerStride(), mat.innerStride(), T::IsRowMajor);
+	return (
+			element_ptr_impl)(mat.data(), i, j, mat.outerStride(), mat.innerStride(), T::IsRowMajor);
 }
-} // namespace internal
-
-template <template <typename, kind> class Tpl, kind K, typename T>
-auto dyn_cast(T&& mat) {
-	return internal::dyn_cast_impl<Tpl, K>::apply(mat);
-}
-
-template <typename T>
-auto as_mut(T&& mat) {
-	return internal::
-			dyn_cast_impl<view, internal::kind_of<meta::uncvref_t<T>>::value>::apply(
-					mat);
-}
-
-template <typename T>
-auto as_const(T const& mat) {
-	return internal::dyn_cast_impl<view, internal::kind_of<T>::value>::apply(mat);
-}
-
-template <
-		typename T,
-		kind K = internal::kind_of<meta::uncvref_t<T>>::value,
-		typename View =
-				view<std::remove_pointer_t<decltype(VEG_DECLVAL(T).data())>, K>>
-
-VEG_NODISCARD auto split_at_row(T&& mat, i64 row) -> tuple<View, View> {
-	static_assert(
-			internal::kind_of<meta::uncvref_t<T>>::value != kind::rowvec, "");
-	VEG_ASSERT_ALL_OF((row >= 0), (row <= mat.rows()));
-	return {
-			elems,
-			View{mat.data(), row, mat.cols(), mat.outerStride()},
-			View{
-					mem::addressof(mat.coeffRef(row, 0)),
-					mat.rows() - row,
-					mat.cols(),
-					mat.outerStride()},
-	};
-}
-
-template <
-		typename T,
-		kind K = internal::kind_of<meta::uncvref_t<T>>::value,
-		typename View =
-				view<std::remove_pointer_t<decltype(VEG_DECLVAL(T).data())>, K>>
-
-VEG_NODISCARD auto split_at_col(T&& mat, i64 col) -> tuple<View, View> {
-	static_assert(
-			internal::kind_of<meta::uncvref_t<T>>::value != kind::colvec, "");
-	VEG_ASSERT_ALL_OF((col >= 0), (col <= mat.cols()));
-	return {
-			elems,
-			View{mat.data(), mat.rows(), col, mat.outerStride()},
-			View{
-					mem::addressof(mat.coeffRef(0, col)),
-					mat.rows(),
-					mat.cols() - col,
-					mat.outerStride()},
-	};
-}
-
-template <
-		typename T,
-		typename View = view<
-				std::remove_pointer_t<decltype(VEG_DECLVAL(T).data())>,
-				kind::colmat>>
-
-VEG_NODISCARD auto split_at(T&& mat, i64 row, i64 col)
-		-> tuple<View, View, View, View> {
-	static_assert(
-			internal::kind_of<meta::uncvref_t<T>>::value == kind::colmat, "");
-	VEG_ASSERT_ALL_OF( //
-			(row >= 0),
-			(row <= mat.rows()),
-			(col >= 0),
-			(col <= mat.cols()));
-	auto const os = mat.outerStride();
-	return {
-			elems,
-			View{mat.data(), row, col, os},
-			View{mem::addressof(mat.coeffRef(0, col)), row, mat.cols() - col, os},
-			View{mem::addressof(mat.coeffRef(row, 0)), mat.rows() - row, col, os},
-			View{
-					mem::addressof(mat.coeffRef(row, col)),
-					mat.rows() - row,
-					mat.cols() - col,
-					os},
-	};
-}
-
-namespace internal {
 
 inline auto aliases_impl(
 		i64 size,
@@ -417,82 +459,381 @@ auto aliases_impl_2(T const& t, U const& u) -> bool {
 			u.outerSize());
 }
 
+constexpr auto any_of(std::initializer_list<bool> lst) -> bool {
+	for (bool b : lst) { // NOLINT(readability-use-anyofallof)
+		if (b) {
+			return true;
+		}
+	}
+	return false;
+}
+
 } // namespace internal
 
-template <typename T, typename... Ts>
-auto aliases(T const& t, Ts const&... ts) -> bool {
-	return meta::any_of({internal::aliases_impl_2(t, ts)...});
-}
+template <typename T, kind K>
+using view_type_t =
+		eigen::view<veg::meta::unptr_t<decltype(VEG_DECLVAL(T &&).data())>, K>;
 
 template <typename T>
-auto slice_to_vec(T& s, i64 /* nrows */ = 0, i64 /* ncols */ = 0) -> view<
-		meta::remove_pointer_t<decltype(VEG_DECLVAL(T&).data())>,
-		kind::colvec> {
-	auto size = narrow<i64>(s.size());
-	return {s.data(), size, 1, size};
-}
-template <typename T>
-auto slice_to_mat(T& s, i64 nrows, i64 ncols) -> view<
-		meta::remove_pointer_t<decltype(VEG_DECLVAL(T&).data())>,
-		kind::colmat> {
-	VEG_DEBUG_ASSERT(nrows * ncols == s.size());
+using deduce_view_t =
+		view_type_t<T, (internal::kind_of<meta::uncvref_t<T>>::value)>;
 
-	Eigen::OuterStride<-1> stride{nrows};
-	auto* p = s.data();
-
-	view<meta::remove_pointer_t<decltype(p)>, kind::colmat> rv{
-			p, nrows, ncols, stride};
-	auto copy = rv;
-	return copy;
-}
-
-template <typename Out, typename In>
-void assign(Out&& out, In const& rhs) {
-	out = eigen::as_const(rhs);
-}
-template <typename Out, typename InL, typename InR>
-void add_to(Out&& out, InL const& lhs, InR const& rhs) {
-	out = eigen::as_const(lhs).operator+(eigen::as_const(rhs));
-}
-template <typename Out, typename InL, typename InR>
-void sub_to(Out&& out, InL const& lhs, InR const& rhs) {
-	out = eigen::as_const(lhs).operator-(eigen::as_const(rhs));
-}
-template <typename Out, typename Mat>
-void mul_scalar_add_to(
-		Out&& out, Mat const& lhs, typename Mat::Scalar const& k) {
-	out.noalias() += eigen::as_const(lhs).operator*(k);
-}
-template <typename Out, typename Mat>
-void mul_scalar_to(Out&& out, Mat const& lhs, typename Mat::Scalar const& k) {
-	out = eigen::as_const(lhs).operator*(k);
-}
-template <typename Out, typename InL, typename InR>
-void mul_add_to_noalias(
-		Out&& out,
-		InL const& lhs,
-		InR const& rhs,
-		typename InL::Scalar const& k = 1) {
-	out.noalias() +=
-			(eigen::as_const(lhs).operator*(eigen::as_const(rhs))).operator*(k);
-}
-template <typename Out, typename InL, typename InR>
-void tmul_add_to_noalias(Out&& out, InL const& lhs, InR const& rhs) {
-	out.noalias() +=
-			eigen::as_const(lhs.transpose()).operator*(eigen::as_const(rhs));
-}
-template <typename InL, typename InR>
-auto dot(InL const& lhs, InR const& rhs) -> typename InL::Scalar {
-	return (eigen::as_const(lhs.transpose()).operator*(eigen::as_const(rhs)))[0];
-}
-template <typename Out>
-void add_identity(
-		Out&& out, typename meta::uncvref_t<Out>::Scalar const& factor = 1) {
-	i64 const small_dim = out.rows() < out.cols() ? out.rows() : out.cols();
-	for (i64 i = 0; i < small_dim; ++i) {
-		out(i, i) += factor;
+namespace nb {
+struct as_const {
+	DDP_TEMPLATE(
+			typename T,
+			requires(DDP_CONCEPT(eigen::matrix<T>)),
+			DDP_NODISCARD HEDLEY_ALWAYS_INLINE auto
+			operator(),
+			(mat, T const&))
+	const noexcept->deduce_view_t<T const&> {
+		return internal::dyn_cast_impl<view, internal::kind_of<T>::value>::apply(
+				mat);
 	}
-}
+};
+struct as_mut {
+	DDP_TEMPLATE(
+			typename T,
+			requires(DDP_CONCEPT(eigen::matrix<uncvref_t<T>>)),
+			DDP_NODISCARD HEDLEY_ALWAYS_INLINE auto
+			operator(),
+			(mat, T&&))
+	const noexcept->deduce_view_t<T> {
+		return internal::dyn_cast_impl<
+				view,
+				internal::kind_of<meta::uncvref_t<T>>::value>::apply(mat);
+	}
+};
+
+struct split_at_row {
+	DDP_TEMPLATE(
+			typename T,
+			requires(DDP_CONCEPT(eigen::matrix<uncvref_t<T>>)),
+			auto
+			operator(),
+			(mat, T&&),
+			(row, i64))
+	const noexcept->Tuple<deduce_view_t<T>, deduce_view_t<T>> {
+
+		VEG_DEBUG_ASSERT_ALL_OF((row >= 0), (row <= mat.rows()));
+		return {
+				direct,
+				deduce_view_t<T>{mat.data(), row, mat.cols(), mat.outerStride()},
+				deduce_view_t<T>{
+						mem::addressof(mat.coeffRef(row, 0)),
+						mat.rows() - row,
+						mat.cols(),
+						mat.outerStride()},
+		};
+	}
+};
+struct split_at_col {
+	DDP_TEMPLATE(
+			typename T,
+			requires(DDP_CONCEPT(eigen::matrix<uncvref_t<T>>)),
+			auto
+			operator(),
+			(mat, T&&),
+			(col, i64))
+	const noexcept->Tuple<deduce_view_t<T>, deduce_view_t<T>> {
+
+		VEG_DEBUG_ASSERT_ALL_OF((col >= 0), (col <= mat.cols()));
+		return {
+				direct,
+				deduce_view_t<T>{mat.data(), mat.rows(), col, mat.outerStride()},
+				deduce_view_t<T>{
+						mem::addressof(mat.coeffRef(0, col)),
+						mat.rows(),
+						mat.cols() - col,
+						mat.outerStride()},
+		};
+	}
+};
+struct split_at {
+	DDP_TEMPLATE(
+			typename T,
+			requires(DDP_CONCEPT(eigen::matrix<uncvref_t<T>>)),
+			auto
+			operator(),
+			(mat, T&&),
+			(row, i64),
+			(col, i64))
+	const noexcept->Tuple<
+			deduce_view_t<T>,
+			deduce_view_t<T>,
+			deduce_view_t<T>,
+			deduce_view_t<T>> {
+
+		VEG_DEBUG_ASSERT_ALL_OF( //
+				(row >= 0),
+				(row <= mat.rows()),
+				(col >= 0),
+				(col <= mat.cols()));
+		auto const os = mat.outerStride();
+		return {
+				direct,
+				deduce_view_t<T>{mat.data(), row, col, os},
+				deduce_view_t<T>{
+						mem::addressof(mat.coeffRef(0, col)), row, mat.cols() - col, os},
+				deduce_view_t<T>{
+						mem::addressof(mat.coeffRef(row, 0)), mat.rows() - row, col, os},
+				deduce_view_t<T>{
+						mem::addressof(mat.coeffRef(row, col)),
+						mat.rows() - row,
+						mat.cols() - col,
+						os},
+		};
+	}
+};
+struct aliases {
+	DDP_TEMPLATE(
+			(typename T, typename... Ts),
+			requires(
+					DDP_CONCEPT(eigen::matrix<T>) &&
+					VEG_ALL_OF(DDP_CONCEPT(eigen::matrix<Ts>))),
+			auto
+			operator(),
+			(t, T const&),
+			(... ts, Ts const&))
+	const noexcept->bool {
+		return (internal::any_of)({(internal::aliases_impl_2)(t, ts)...});
+	}
+};
+struct slice_to_vec {
+	DDP_TEMPLATE(
+			typename T,
+			requires(
+					DDP_CONCEPT(aux::has_data<T>) && DDP_CONCEPT(aux::has_size<T>) &&
+					VEG_CONCEPT(pointer<member_data_t<T&>>) &&
+					VEG_CONCEPT(constructible<i64, member_size_t<T&>>)),
+			auto
+			operator(),
+			(s, T&),
+			(/*nrows*/ = 0, i64),
+			(/*ncols*/ = 0, i64))
+	const noexcept->view<meta::unptr_t<member_data_t<T&>>, kind::colvec> {
+		auto size = narrow<i64>(s.size());
+		return {s.data(), size, 1, size};
+	}
+};
+struct slice_to_mat {
+	DDP_TEMPLATE(
+			typename T,
+			requires(
+					DDP_CONCEPT(aux::has_data<T>) && DDP_CONCEPT(aux::has_size<T>) &&
+					VEG_CONCEPT(pointer<member_data_t<T&>>) &&
+					VEG_CONCEPT(constructible<i64, member_size_t<T&>>)),
+			auto
+			operator(),
+			(s, T&),
+			(nrows, i64),
+			(ncols, i64))
+	const noexcept->view<meta::unptr_t<member_data_t<T&>>, kind::colmat> {
+		VEG_DEBUG_ASSERT(nrows * ncols == s.size());
+		return {s.data(), nrows, ncols, nrows};
+	}
+};
+} // namespace nb
+DDP_NIEBLOID(as_const);
+DDP_NIEBLOID(as_mut);
+DDP_NIEBLOID(split_at_row);
+DDP_NIEBLOID(split_at_col);
+DDP_NIEBLOID(split_at);
+DDP_NIEBLOID(aliases);
+DDP_NIEBLOID(slice_to_vec);
+DDP_NIEBLOID(slice_to_mat);
+
+namespace nb {
+struct assign {
+	DDP_TEMPLATE(
+			(typename Out, typename In),
+			requires(
+					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<In>) && //
+					VEG_CONCEPT(same<scalar_t<In>, scalar_t<uncvref_t<Out>>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<In>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, cols_t<In>>)),
+			void
+			operator(),
+			(out, Out&&),
+			(in, In const&))
+	const { as_mut{}(out) = as_const{}(in); }
+};
+struct add_to {
+	DDP_TEMPLATE(
+			(typename Out, typename Lhs, typename Rhs),
+			requires(
+					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<Lhs>) && //
+					DDP_CONCEPT(eigen::matrix<Rhs>) &&
+					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<uncvref_t<Out>>>) &&
+
+					DDP_CONCEPT(eigen::aux::maybe_same<rows_t<Lhs>, rows_t<Rhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<cols_t<Lhs>, cols_t<Rhs>>) &&
+
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
+
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Rhs>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Rhs>>)),
+			void
+			operator(),
+			(out, Out&&),
+			(lhs, Lhs const&),
+			(rhs, Rhs const&))
+	const { as_mut{}(out) = as_const{}(lhs).operator+(as_const{}(rhs)); }
+};
+struct sub_to {
+	DDP_TEMPLATE(
+			(typename Out, typename Lhs, typename Rhs),
+			requires(
+					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<Lhs>) && //
+					DDP_CONCEPT(eigen::matrix<Rhs>) &&
+					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<uncvref_t<Out>>>) &&
+
+					DDP_CONCEPT(eigen::aux::maybe_same<rows_t<Lhs>, rows_t<Rhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<cols_t<Lhs>, rows_t<Rhs>>) &&
+
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
+
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Rhs>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<Rhs>>)),
+			void
+			operator(),
+			(out, Out&&),
+			(lhs, Lhs const&),
+			(rhs, Rhs const&))
+	const { as_mut{}(out) = as_const{}(lhs).operator-(as_const{}(rhs)); }
+};
+struct mul_scalar_to {
+	DDP_TEMPLATE(
+			(typename Out, typename In),
+			requires(
+					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<In>) &&
+					VEG_CONCEPT(same<scalar_t<In>, scalar_t<uncvref_t<Out>>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<In>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<In>>)),
+			void
+			operator(),
+			(out, Out&&),
+			(in, In const&),
+			(k = scalar_t<In>(1), scalar_t<In> const&))
+	const { as_mut{}(out) = as_const{}(in).operator*(k); }
+};
+struct mul_scalar_add_to {
+	DDP_TEMPLATE(
+			(typename Out, typename In),
+			requires(
+					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<In>) &&
+					VEG_CONCEPT(same<scalar_t<In>, scalar_t<uncvref_t<Out>>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<In>>) &&
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<In>>)),
+			void
+			operator(),
+			(out, Out&&),
+			(in, In const&),
+			(k = scalar_t<In>(1), scalar_t<In> const&))
+	const { as_mut{}(out) += as_const{}(in).operator*(k); }
+};
+
+struct mul_add_to_noalias {
+	DDP_TEMPLATE(
+			(typename Out, typename Lhs, typename Rhs),
+			requires(
+					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<Lhs>) && //
+					DDP_CONCEPT(eigen::matrix<Rhs>) &&
+					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<uncvref_t<Out>>>) &&
+
+					DDP_CONCEPT(eigen::aux::maybe_same<cols_t<Lhs>, rows_t<Rhs>>) &&
+
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
+
+					DDP_CONCEPT(
+							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<Rhs>>)),
+			void
+			operator(),
+			(out, Out&&),
+			(lhs, Lhs const&),
+			(rhs, Rhs const&),
+			(k = scalar_t<Lhs>(1), scalar_t<Lhs> const&))
+	const {
+		as_mut{}(out).noalias() +=
+				(as_const{}(lhs).operator*(as_const{}(rhs))).operator*(k);
+	}
+};
+
+struct dot {
+	DDP_TEMPLATE(
+			(typename Lhs, typename Rhs),
+			requires(
+					DDP_CONCEPT(eigen::vector<Lhs>) && //
+					DDP_CONCEPT(eigen::vector<Rhs>) &&
+					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<Rhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<rows_t<Lhs>, rows_t<Rhs>>)),
+			auto
+			operator(),
+			(lhs, Lhs const&),
+			(rhs, Rhs const&))
+	const->scalar_t<Lhs> {
+		return (as_const{}(lhs.transpose()).operator*(as_const{}(rhs)))[0];
+	}
+};
+struct add_identity {
+	DDP_TEMPLATE(
+			typename T,
+			requires(
+					DDP_CONCEPT(eigen::matrix<uncvref_t<T>>) &&
+					VEG_CONCEPT(constructible<uncvref_t<T>&, T&>)),
+			void
+			operator(),
+			(mat, T&&),
+			(factor = scalar_t<uncvref_t<T>>(1), scalar_t<uncvref_t<T>> const&))
+	const {
+		auto _mat = as_mut{}(mat);
+		i64 const small_dim = _mat.rows() < _mat.cols() ? _mat.rows() : _mat.cols();
+		for (i64 i = 0; i < small_dim; ++i) {
+			_mat(i, i) += factor;
+		}
+	}
+};
+} // namespace nb
+DDP_NIEBLOID(assign);
+DDP_NIEBLOID(add_to);
+DDP_NIEBLOID(sub_to);
+DDP_NIEBLOID(mul_scalar_to);
+DDP_NIEBLOID(mul_scalar_add_to);
+DDP_NIEBLOID(mul_add_to_noalias);
+DDP_NIEBLOID(dot);
+DDP_NIEBLOID(add_identity);
 
 template <typename T>
 struct heap_matrix<T, kind::colmat> {
@@ -547,7 +888,7 @@ using eigen::view;
 } // namespace ddp
 
 template <typename T, typename CharT>
-struct ::fmt::formatter<ddp::eigen::internal::with_formatter<T>, CharT> {
+struct fmt::formatter<ddp::eigen::internal::with_formatter<T>, CharT> {
 	auto parse(::fmt::basic_format_parse_context<CharT>& pc) {
 		return pc.begin();
 	}
@@ -560,7 +901,7 @@ struct ::fmt::formatter<ddp::eigen::internal::with_formatter<T>, CharT> {
 };
 
 template <typename Matrix>
-struct ::fmt::formatter<
+struct fmt::formatter<
 		Matrix,
 		char,
 		veg::meta::enable_if_t<
@@ -587,23 +928,27 @@ struct ::fmt::formatter<
 	(Name).setConstant(::std::numeric_limits<T>::quiet_NaN())
 #endif
 
-#define __DDP_TMP_IMPL(Stack_Func, Cvt_Func, Stack, Name, Type, Rows, Cols)    \
+#define __DDP_TMP_IMPL_MAT(Stack_Func, Stack, Name, Type, Rows, Cols)          \
 	auto Name##_storage##__LINE__ =                                              \
-			(Stack).Stack_Func(::veg::tag_t<Type>{}, (Rows) * (Cols)).unwrap();      \
-	auto(Name) = ::ddp::eigen::Cvt_Func(Name##_storage##__LINE__, Rows, Cols)
+			(Stack).Stack_Func(::veg::Tag<Type>{}, (Rows) * (Cols)).unwrap();      \
+	auto(Name) = ::ddp::eigen::slice_to_mat(Name##_storage##__LINE__, Rows, Cols)
+
+#define __DDP_TMP_IMPL_VEC(Stack_Func, Stack, Name, Type, Rows)                \
+	auto Name##_storage##__LINE__ =                                              \
+			(Stack).Stack_Func(::veg::Tag<Type>{}, (Rows)).unwrap();               \
+	auto(Name) = ::ddp::eigen::slice_to_vec(Name##_storage##__LINE__)
 
 #define DDP_TMP_MATRIX_UNINIT(Stack, Name, T, R, C)                            \
-	__DDP_TMP_IMPL(make_new_for_overwrite, slice_to_mat, Stack, Name, T, R, C);  \
+	__DDP_TMP_IMPL_MAT(make_new_for_overwrite, Stack, Name, T, R, C);            \
 	__DDP_SET_UNINIT(T, Name)
+#define DDP_TMP_MATRIX(Stack, Name, T, R, C)                                   \
+	__DDP_TMP_IMPL_MAT(make_new, Stack, Name, T, R, C)
 
 #define DDP_TMP_VECTOR_UNINIT(Stack, Name, T, R)                               \
-	__DDP_TMP_IMPL(make_new_for_overwrite, slice_to_vec, Stack, Name, T, R, 1);  \
+	__DDP_TMP_IMPL_VEC(make_new_for_overwrite, Stack, Name, T, R);               \
 	__DDP_SET_UNINIT(T, Name)
-
-#define DDP_TMP_MATRIX(Stack, Name, T, R, C)                                   \
-	__DDP_TMP_IMPL(make_new, slice_to_mat, Stack, Name, T, R, C)
 #define DDP_TMP_VECTOR(Stack, Name, T, R)                                      \
-	__DDP_TMP_IMPL(make_new, slice_to_vec, Stack, Name, T, R, 1)
+	__DDP_TMP_IMPL_VEC(make_new, Stack, Name, T, R)
 
 #include "veg/internal/epilogue.hpp"
 #endif /* end of include guard DDP_PINOCCHIO_EIGEN_HPP_BDOKZRTGS */

@@ -28,7 +28,7 @@ auto main() -> int {
 	b.setRandom();
 	c.setZero();
 	auto dynamics = ddp::make::lqr_dynamics(a, b, c);
-	auto constraint = ddp::no_constraint<decltype(dynamics)>{{dynamics}};
+	auto constraint = ddp::no_constraint<decltype(dynamics)>{};
 	i64 nx = 3;
 	i64 ndx = 3;
 	i64 nu = 3;

@@ -36,7 +36,6 @@ set(CONAN_REQUIRES
     # Boost Software License 1.0
     boost/1.74.0
     # MIT License
-    gsl-lite/0.37.0
     fmt/7.1.3
     spdlog/1.8.2
     backward-cpp/1.5
@@ -51,7 +50,7 @@ set(CONAN_REQUIRES
     mpfr/4.1.0
 )
 target_compile_definitions(
-  ddp-pinocchio PUBLIC SPDLOG_FMT_EXTERNAL gsl_CONFIG_DEFAULTS_VERSION=1
+  ddp-pinocchio PUBLIC SPDLOG_FMT_EXTERNAL
 )
 set(CONAN_OPTIONS)
 run_conan()
@@ -87,7 +86,6 @@ pkg_check_modules(
 target_link_libraries(
   ddp-pinocchio
   PUBLIC CONAN_PKG::boost
-         CONAN_PKG::gsl-lite
          CONAN_PKG::fmt
          CONAN_PKG::spdlog
          CONAN_PKG::eigen
@@ -99,12 +97,12 @@ target_link_libraries(
          PkgConfig::example-robot-data
          OpenMP::OpenMP_CXX
 )
+add_subdirectory(external/mpfr-cxx)
+add_subdirectory(external/veg)
 
 if(top_level AND ENABLE_TESTING)
   add_library(project_warnings INTERFACE)
   add_library(project_options INTERFACE)
-  add_subdirectory(external/mpfr-cxx)
-  add_subdirectory(external/veg)
 
   target_link_libraries(
     ddp-pinocchio INTERFACE project_options project_warnings

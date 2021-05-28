@@ -16,7 +16,7 @@ template <>
 struct dims<colvec> {
 	i64 row_;
 	auto rows() const -> i64 { return row_; }
-	auto cols() const -> i64 { return (void)this, 1; }
+	auto cols() const -> i64 { return unused(this), 1; }
 };
 
 template <>
@@ -38,10 +38,10 @@ struct layout {
 template <typename Idx, eigen::kind K>
 struct idx_base {
 	auto derived() const -> Idx const& { return static_cast<Idx const&>(*this); }
-	auto dim_data() const -> slice<dims<K> const> {
+	auto dim_data() const -> Slice<dims<K> const> {
 		return {derived().dim_data_impl(), index_end() - index_begin()};
 	}
-	auto offset_data() const -> slice<i64 const> {
+	auto offset_data() const -> Slice<i64 const> {
 		return {derived().offset_data_impl(), index_end() - index_begin() + 1};
 	}
 
@@ -53,7 +53,7 @@ struct idx_base {
 
 	auto required_memory() const -> i64 { return offset(index_end()); }
 	auto offset(i64 t) const -> i64 {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= index_begin()),
 				(t <= index_end()));
 		return offset_data()[t - index_begin()];
@@ -63,13 +63,13 @@ struct idx_base {
 	auto max_cols() const -> i64 { return self.max_cols; }
 
 	auto rows(i64 t) const -> i64 {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= index_begin()),
 				(t < index_end()));
 		return dim_data()[t - index_begin()].rows();
 	}
 	auto cols(i64 t) const -> i64 {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= index_begin()),
 				(t < index_end()));
 		return dim_data()[t - index_begin()].cols();
@@ -134,7 +134,7 @@ struct idx : internal::idx_base<idx<K>, K> {
 			i64 r = rc.rows();
 			i64 c = rc.cols();
 
-			VEG_ASSERT_ALL_OF((r >= 0), (c >= 0));
+			VEG_DEBUG_ASSERT_ALL_OF((r >= 0), (c >= 0));
 
 			self.dim_data[to_usize(t - begin)] = rc;
 			self.offset_data[to_usize(t - begin + 1)] =
@@ -147,10 +147,9 @@ struct idx : internal::idx_base<idx<K>, K> {
 	}
 
 public:
-	VEG_TEMPLATE(
+	DDP_TEMPLATE(
 			typename Fn,
-			requires(VEG_CONCEPT(
-					same<dims<K>, meta::detected_t<meta::invoke_result_t, Fn&, i64>>)),
+			requires(VEG_CONCEPT(invocable_r<Fn&, dims<K>, i64>)),
 			idx,
 			(begin, i64),
 			(end, i64),
@@ -161,8 +160,8 @@ public:
 		return {base::self, {self.dim_data.data(), self.offset_data.data()}};
 	}
 
-	auto into_parts() && -> tuple<typename base::layout, layout> {
-		return {elems, base::self, self};
+	auto into_parts() && -> Tuple<typename base::layout, layout> {
+		return {direct, base::self, self};
 	}
 
 	using base::index_begin;
@@ -178,6 +177,8 @@ namespace internal {
 
 template <typename T, eigen::kind K>
 struct mat_seq {
+	DDP_CHECK_CONCEPT(scalar<T>);
+
 	static_assert(!std::is_const<T>::value, "");
 	using const_view = view<T const, K>;
 	using mut_view = view<T, K>;
@@ -199,26 +200,26 @@ public:
 	auto index_end() const -> i64 { return self.idx.index_end(); }
 
 	auto operator[](i64 t) const -> const_view {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= self.idx.index_begin()),
 				(t < self.idx.index_end()));
-		return eigen::dyn_cast<view, K>(view<T const, colmat>{
+		return view<T const, K>{
 				self.data.data() + (self.idx.offset(t)),
 				self.idx.rows(t),
 				self.idx.cols(t),
 				self.idx.rows(t),
-		});
+		};
 	}
 	auto operator[](i64 t) -> mut_view {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= self.idx.index_begin()),
 				(t < self.idx.index_end()));
-		return eigen::dyn_cast<view, K>(view<T, colmat>{
+		return view<T, K>{
 				self.data.data() + self.idx.offset(t),
 				self.idx.rows(t),
 				self.idx.cols(t),
 				self.idx.rows(t),
-		});
+		};
 	}
 };
 

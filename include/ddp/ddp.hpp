@@ -5,7 +5,7 @@
 #include "ddp/internal/function_models.hpp"
 #include "ddp/space.hpp"
 #include "ddp/internal/idx_transforms.hpp"
-#include "veg/timer.hpp"
+#include "veg/util/timer.hpp"
 #include <Eigen/Cholesky>
 #include <iostream>
 #include "veg/internal/prologue.hpp"
@@ -18,7 +18,7 @@ struct thread_perf {
 	bool use_threads;
 	auto avg() const -> long double {
 		return static_cast<long double>(total_duration) /
-					 static_cast<long double>(count);
+		       static_cast<long double>(count);
 	}
 };
 } // namespace internal
@@ -95,7 +95,7 @@ struct ddp {
 				constraint_output_space eq_space,
 				trajectory const& traj) -> type {
 
-			(void)traj, (void)x_space;
+			unused(traj, x_space);
 			auto begin = traj.index_begin();
 			auto end = traj.index_end();
 			auto multipliers = type{eq_type{begin, end, eq_space}};
@@ -156,9 +156,11 @@ struct ddp {
 				narrow<usize>(
 						dynamics.eval_to_req().size + dynamics.eval_to_req().align));
 
-		auto stack = dynamic_stack_view(
-				{stack_storage.data(), narrow<i64>(stack_storage.size())});
+		auto stack =
+				DynStackView({stack_storage.data(), narrow<i64>(stack_storage.size())});
 		auto k = dynamics.acquire_workspace();
+
+		VEG_DEBUG_ASSERT(x_init.rows() == traj[begin][0_c].rows());
 		traj[begin][0_c] = x_init;
 		for (i64 t = begin; t < end; ++t) {
 			VEG_BIND(auto, (x, u), traj[t]);
@@ -269,7 +271,7 @@ struct ddp {
 			Mult_Seq const& mults,
 			scalar const& mu,
 			derivative_storage const& derivs,
-			dynamic_stack_view stack) const -> scalar {
+			DynStackView stack) const -> scalar {
 
 		using std::max;
 
@@ -372,9 +374,9 @@ struct ddp {
 			scalar w,
 			scalar n,
 			scalar stopping_threshold,
-			dynamic_stack_view stack,
+			DynStackView stack,
 			internal::thread_perf& threading_method) const
-			-> tuple<mult_update_attempt_result_e, scalar, scalar> {
+			-> Tuple<mult_update_attempt_result_e, scalar, scalar> {
 
 		threading_method.total_duration += internal::compute_second_derivatives(
 				derivs,
@@ -393,7 +395,7 @@ struct ddp {
 
 		if (opt_constr < stopping_threshold and opt_obj < stopping_threshold) {
 			return {
-					elems,
+					direct,
 					mult_update_attempt_result_e::optimum_attained,
 					opt_obj,
 					opt_constr,
@@ -413,14 +415,14 @@ struct ddp {
 					}
 				}
 				return {
-						elems,
+						direct,
 						mult_update_attempt_result_e::update_success,
 						opt_obj,
 						opt_constr,
 				};
 			} else {
 				return {
-						elems,
+						direct,
 						mult_update_attempt_result_e::update_failure,
 						opt_obj,
 						opt_constr,
@@ -428,7 +430,7 @@ struct ddp {
 			}
 		} else {
 			return {
-					elems,
+					direct,
 					mult_update_attempt_result_e::no_update,
 					opt_obj,
 					opt_constr,
@@ -441,7 +443,7 @@ struct ddp {
 			i64 max_iterations,
 			scalar optimality_stopping_threshold,
 			scalar mu,
-			trajectory traj) -> tuple<trajectory, control_feedback> {
+			trajectory traj) -> Tuple<trajectory, control_feedback> {
 
 		auto mult = zero_multipliers<M>(traj);
 		auto reg = regularization<scalar>{0, 1, 2, 1e-5};
@@ -474,7 +476,7 @@ struct ddp {
 		auto stack_storage =
 				std::vector<unsigned char>(narrow<usize>(req.align + req.size));
 
-		dynamic_stack_view stack(slice<void>{stack_storage});
+		DynStackView stack(Slice<void>{stack_storage});
 
 		internal::thread_perf single{0, 0, false};
 		internal::thread_perf multi{0, 0, true};
@@ -519,7 +521,7 @@ struct ddp {
 								optimality_stopping_threshold,
 								stack,
 								threading_method)));
-				(void)opt_obj;
+				unused(opt_obj);
 
 				scalar const beta = 0.5;
 				switch (mult_update_rv) {
@@ -548,7 +550,7 @@ struct ddp {
 				}
 				case mult_update_attempt_result_e::optimum_attained:
 					return {
-							elems,
+							direct,
 							VEG_FWD(traj),
 							VEG_FWD(ctrl),
 					};
@@ -556,15 +558,16 @@ struct ddp {
 			}
 
 			{
-				time::log_elapsed_time fn{"bwd pass"};
-				time::raii_timer timer{fn};
+				auto&& _ = time::raii_timer(time::log_elapsed_time("bwd pass"));
+				veg::unused(_);
+
 				bwd_pass(ctrl, reg, mu, traj, mult, derivs, stack);
 			}
 
 			::fmt::print(
 					stdout,
-					"===================================================================="
-					"================================\n"
+					"=================================================="
+					"==================================================\n"
 					"iter: {:5}   mu: {:13}   reg: {:13}   w: {:13}   n: {:13}\n",
 					i,
 					mu,
@@ -573,8 +576,9 @@ struct ddp {
 					n);
 
 			{
-				time::log_elapsed_time fn{"fwd pass"};
-				time::raii_timer timer{fn};
+				auto&& _ = time::raii_timer(time::log_elapsed_time("fwd pass"));
+				veg::unused(_);
+
 				auto res = fwd_pass(
 						traj2,
 						traj,
@@ -592,7 +596,7 @@ struct ddp {
 			std::swap(traj, traj2);
 		}
 		return {
-				elems,
+				direct,
 				VEG_FWD(traj),
 				VEG_FWD(ctrl),
 		};
@@ -628,7 +632,7 @@ struct ddp {
 			trajectory const& current_traj,
 			Mults const& mults,
 			derivative_storage const& derivatives,
-			dynamic_stack_view stack) const -> scalar {
+			DynStackView stack) const -> scalar {
 
 		bool success = false;
 
@@ -776,6 +780,8 @@ struct ddp {
 					}
 				}
 
+				::fmt::print("{}\n", k);
+
 				{
 					DDP_TMP_VECTOR(stack, dotk, scalar, Q_uu.rows());
 					eigen::mul_add_to_noalias(dotk, Q_uu, k);
@@ -820,8 +826,8 @@ struct ddp {
 			control_feedback const& feedback,
 			scalar mu,
 			key k,
-			dynamic_stack_view stack,
-			bool do_linesearch = true) const -> tuple<key, scalar> {
+			DynStackView stack,
+			bool do_linesearch = true) const -> Tuple<key, scalar> {
 
 		auto begin = reference_traj.index_begin();
 		auto end = reference_traj.index_end();
@@ -868,8 +874,8 @@ struct ddp {
 						stack);
 
 				u_new = u_old                         //
-								+ step * feedback.self.val[t] //
-								+ feedback.self.jac[t] * tmp;
+				        + step * feedback.self.val[t] //
+				        + feedback.self.jac[t] * tmp;
 				k = dynamics.eval_to(
 						x_next_new,
 						t,
@@ -898,7 +904,7 @@ struct ddp {
 			}
 		}
 
-		return {elems, VEG_FWD(k), step};
+		return {direct, VEG_FWD(k), step};
 	}
 
 	template <typename Mults>
@@ -922,7 +928,7 @@ struct ddp {
 			Mults const& mults,
 			scalar mu,
 			key k,
-			dynamic_stack_view stack) const -> key {
+			DynStackView stack) const -> key {
 
 		auto csp = constraint.ref(dynamics).output_space();
 

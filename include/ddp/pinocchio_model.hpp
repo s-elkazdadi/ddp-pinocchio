@@ -10,23 +10,27 @@ namespace pinocchio {
 
 template <typename T>
 struct skew_mat {
-	array<T, 9> data;
+	DDP_CHECK_CONCEPT(scalar<T>);
+	Array<T, 9> data;
 };
 
 template <typename T>
 struct se3 {
-	array<T, 9> rot /* 3x3 col major */;
-	array<T, 3> trans;
+	DDP_CHECK_CONCEPT(scalar<T>);
+	Array<T, 9> rot /* 3x3 col major */;
+	Array<T, 3> trans;
 };
 template <typename T>
 struct motion {
-	array<T, 3> angular;
-	array<T, 3> linear;
+	DDP_CHECK_CONCEPT(scalar<T>);
+	Array<T, 3> angular;
+	Array<T, 3> linear;
 };
 template <typename T>
 struct force {
-	array<T, 3> angular;
-	array<T, 3> linear;
+	DDP_CHECK_CONCEPT(scalar<T>);
+	Array<T, 3> angular;
+	Array<T, 3> linear;
 };
 
 namespace internal {
@@ -35,6 +39,8 @@ struct pinocchio_impl;
 
 template <typename T>
 struct model {
+	DDP_CHECK_CONCEPT(scalar<T>);
+
 	using scalar = T;
 
 	using mut_vec = view<T, colvec>;
@@ -65,7 +71,7 @@ public:
 		key(key&& other) noexcept : parent{other.parent} { other.parent = nullptr; }
 		auto operator=(key const&) -> key& = delete;
 		auto operator=(key&& other) noexcept -> key& {
-			VEG_ASSERT("no wasting keys :<", !(*this));
+			VEG_DEBUG_ASSERT("no wasting keys :<", !(*this));
 
 			destroy();
 			parent = other.parent;
@@ -149,7 +155,7 @@ public:
       const_vec q,                                                  //
       const_vec v,                                                  //
       const_vec tau,                                                // use a generator for `fext' because
-      option<fn::fn_view<fn::nothrow<option<tuple<i64, force<T>>>()>>> fext_gen, // pinocchio's aligned vector, and ForceTpl
+      Option<fn::FnView<Option<Tuple<i64, force<T>>>()>> fext_gen, // pinocchio's aligned vector, and ForceTpl
       key k                                                         // are not visible
   ) const -> key;
 	// clang-format on
@@ -159,8 +165,8 @@ public:
 			const_vec q,            //
 			const_vec v,            //
 			const_vec a,            //
-			option<fn::fn_view<fn::nothrow<option<tuple<i64, force<T>>>()>>>
-					fext_gen, //
+			Option<fn::FnView<Option<Tuple<i64, force<T>>>()>>
+					fext_gen, // pinocchio's aligned vector, and ForceTpl
 			key k         //
 	) const -> key;
 
@@ -172,8 +178,8 @@ public:
 			const_vec q,                      //
 			const_vec v,                      //
 			const_vec tau,                    //
-			option<fn::fn_view<fn::nothrow<option<tuple<i64, force<T>>>()>>>
-					fext_gen, //
+			Option<fn::FnView<Option<Tuple<i64, force<T>>>()>>
+					fext_gen, // pinocchio's aligned vector, and ForceTpl
 			key k         //
 	) const -> key;
 
@@ -184,21 +190,9 @@ public:
 			const_vec q,              //
 			const_vec v,              //
 			const_vec a,              //
-			option<fn::fn_view<fn::nothrow<option<tuple<i64, force<T>>>()>>>
-					fext_gen, //
+			Option<fn::FnView<Option<Tuple<i64, force<T>>>()>>
+					fext_gen, // pinocchio's aligned vector, and ForceTpl
 			key k         //
-	) const -> key;
-
-	auto d_contact_dynamics(              //
-			mut_colmat out_acceleration_dq,   //
-			mut_colmat out_acceleration_dv,   //
-			mut_colmat out_acceleration_dtau, //
-			const_vec q,                      //
-			const_vec v,                      //
-			const_vec tau,                    //
-			slice<i64 const> indices,         //
-			i64 n_frames,                     //
-			key k                             //
 	) const -> key;
 
 	auto compute_forward_kinematics(
@@ -216,13 +210,13 @@ public:
 	auto compute_frames_forward_kinematics(const_vec q, key k) const -> key;
 
 	auto compute_joint_jacobians(const_vec q, key k) const -> key;
-	auto frame_se3(i64 frame_id, key k) const -> tuple<key, se3<T>>;
+	auto frame_se3(i64 frame_id, key k) const -> Tuple<key, se3<T>>;
 	auto d_frame_se3(mut_colmat out, i64 frame_id, key k) const -> key;
 
 	auto frame_classical_acceleration(i64 frame_id, key k) const
-			-> tuple<key, motion<T>>;
+			-> Tuple<key, motion<T>>;
 
-	auto frame_velocity(i64 frame_id, key k) const -> tuple<key, motion<T>>;
+	auto frame_velocity(i64 frame_id, key k) const -> Tuple<key, motion<T>>;
 	auto d_frame_acceleration(
 			mut_colmat dv_dq,
 			mut_colmat da_dq,
@@ -231,19 +225,7 @@ public:
 			i64 frame_id,
 			key k) const -> key;
 
-	auto tau_sol(                       //
-			const_vec q,                    //
-			const_vec v,                    //
-			slice<i64 const> frame_indices, //
-			i64 n_frames                    //
-	) const -> matrix<T, colvec>;
-
 	auto frames_forward_kinematics(const_vec q, key k) const -> key;
-
-	auto frame_coordinates_precompute(const_vec q, key k) const -> key;
-	auto frame_coordinates(mut_vec out, i64 i, key k) const -> key;
-	auto dframe_coordinates_precompute(const_vec q, key k) const -> key;
-	auto d_frame_coordinates(mut_colmat out, i64 i, key k) const -> key;
 
 	auto n_frames() const -> i64;
 	auto frame_name(i64 i) const -> ::fmt::string_view;

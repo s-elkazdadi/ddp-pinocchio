@@ -41,7 +41,7 @@ auto main() -> int {
 
 	auto dynamics = ddp::make::pinocchio_dynamics_free(m, 0.01);
 
-	auto constraint = ddp::no_constraint<decltype(dynamics)>{{dynamics}};
+	auto constraint = ddp::no_constraint<decltype(dynamics)>{};
 
 	auto cost = [&] {
 		eigen::heap_matrix<scalar, ddp::colvec> u0(ndu);

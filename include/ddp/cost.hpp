@@ -25,19 +25,22 @@ struct quadratic_cost_fixed_size {
 
 		auto eval_req() const -> mem_req { return {tag<T>, 0}; }
 		auto d_eval_to_req() const -> mem_req {
-			return {tag<T>, meta::max_of({q.rows(), r.rows(), rf.rows()})};
+			return mem_req::max_of({
+					{tag<T>, q.rows()},
+					{tag<T>, r.rows()},
+					{tag<T>, rf.rows()},
+			});
 		}
 		auto dd_eval_to_req() const -> mem_req { return {tag<T>, 0}; }
 
 		template <typename Key>
-		auto
-		eval_final(view<T const, colvec> x, Key k, dynamic_stack_view stack) const
-				-> tuple<Key, T> {
+		auto eval_final(view<T const, colvec> x, Key k, DynStackView stack) const
+				-> Tuple<Key, T> {
 			auto nx = rf.rows();
 			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
 			DDP_TMP_VECTOR(stack, tmp, T, nx);
 			eigen::mul_add_to_noalias(tmp, Rf, x);
-			return {elems, VEG_FWD(k), 0.5 * eigen::dot(tmp, x) + eigen::dot(rf, x)};
+			return {direct, VEG_FWD(k), 0.5 * eigen::dot(tmp, x) + eigen::dot(rf, x)};
 		}
 
 		template <typename Key>
@@ -45,9 +48,9 @@ struct quadratic_cost_fixed_size {
 				view<T, colvec> out_x,
 				view<T const, colvec> x,
 				Key k,
-				dynamic_stack_view stack) const -> Key {
+				DynStackView stack) const -> Key {
 			auto nx = r.rows();
-			(void)nx, (void)stack;
+			unused(nx, stack);
 
 			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
 
@@ -61,9 +64,9 @@ struct quadratic_cost_fixed_size {
 				view<T, colmat> out_xx,
 				view<T const, colvec> x,
 				Key k,
-				dynamic_stack_view stack) const -> Key {
+				DynStackView stack) const -> Key {
 			auto nx = rf.rows();
-			(void)stack, (void)x;
+			unused(stack, nx, x);
 
 			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
 			eigen::assign(out_xx, Rf);
@@ -76,13 +79,11 @@ struct quadratic_cost_fixed_size {
 				view<T const, colvec> x,
 				view<T const, colvec> u,
 				Key k,
-				dynamic_stack_view stack) const -> tuple<Key, T> {
-
-			(void)t;
+				DynStackView stack) const -> Tuple<Key, T> {
 
 			auto nu = q.rows();
 			auto nx = r.rows();
-			(void)nu, (void)nx;
+			unused(t, nu, nx);
 
 			VEG_DEBUG_ASSERT_ALL_OF( //
 					x.rows() == nx,
@@ -103,7 +104,7 @@ struct quadratic_cost_fixed_size {
 				out += eigen::dot(eigen::as_const(tmp), u) / 2;
 				out += eigen::dot(q, u);
 			}
-			return {elems, VEG_FWD(k), out};
+			return {direct, VEG_FWD(k), out};
 		}
 
 		template <typename Key>
@@ -114,13 +115,11 @@ struct quadratic_cost_fixed_size {
 				view<T const, colvec> x,
 				view<T const, colvec> u,
 				Key k,
-				dynamic_stack_view stack) const -> Key {
-
-			(void)stack, (void)t;
+				DynStackView stack) const -> Key {
 
 			auto nu = q.rows();
 			auto nx = r.rows();
-			(void)nu, (void)nx;
+			unused(stack, t, nu, nx);
 
 			VEG_DEBUG_ASSERT_ALL_OF( //
 					x.rows() == nx,
@@ -144,13 +143,12 @@ struct quadratic_cost_fixed_size {
 				view<T const, colvec> x,
 				view<T const, colvec> u,
 				Key k,
-				dynamic_stack_view stack) const -> Key {
-
-			(void)t, (void)x, (void)u, (void)stack;
+				DynStackView stack) const -> Key {
 
 			auto nu = q.rows();
 			auto nx = r.rows();
-			(void)nu, (void)nx;
+
+			unused(t, x, u, stack, nu, nx);
 
 			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx, u.rows() == nu);
 
@@ -187,7 +185,7 @@ struct quadratic_cost_fixed_size_fn {
 			eigen::heap_matrix<T, colmat> Rf) const -> quadratic_cost_fixed_size<T> {
 		auto nq = q.get().rows();
 		auto nr = r.get().rows();
-		(void)nq, (void)nr;
+		unused(nq, nr);
 		VEG_DEBUG_ASSERT_ALL_OF(
 				Q.get().rows() == nq,
 				Q.get().cols() == nq,

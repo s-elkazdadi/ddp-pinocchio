@@ -28,10 +28,10 @@ struct tensor_layout {
 template <typename Idx>
 struct tensor_idx_view_base {
 	auto derived() const -> Idx const& { return static_cast<Idx const&>(*this); }
-	auto dim_data() const -> slice<tensor_dims const> {
+	auto dim_data() const -> Slice<tensor_dims const> {
 		return {derived().dim_data(), index_end() - index_begin()};
 	}
-	auto offset_data() const -> slice<i64 const> {
+	auto offset_data() const -> Slice<i64 const> {
 		return {derived().offset_data(), index_end() - index_begin() + 1};
 	}
 
@@ -43,25 +43,25 @@ struct tensor_idx_view_base {
 
 	auto required_memory() const -> i64 { return offset(index_end()); }
 	auto offset(i64 t) const -> i64 {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= index_begin()),
 				(t <= index_end()));
 		return offset_data()[t - index_begin()];
 	}
 	auto out(i64 t) const -> i64 {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= index_begin()),
 				(t < index_end()));
 		return dim_data()[t - index_begin()].out();
 	}
 	auto left(i64 t) const -> i64 {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= index_begin()),
 				(t < index_end()));
 		return dim_data()[t - index_begin()].left();
 	}
 	auto right(i64 t) const -> i64 {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= index_begin()),
 				(t < index_end()));
 		return dim_data()[t - index_begin()].right();
@@ -124,7 +124,7 @@ struct tensor_idx : internal::tensor_idx_view_base<tensor_idx> {
 			i64 l = olr.left();
 			i64 r = olr.right();
 
-			VEG_ASSERT_ALL_OF((o >= 0), (l >= 0), (r >= 0));
+			VEG_DEBUG_ASSERT_ALL_OF((o >= 0), (l >= 0), (r >= 0));
 
 			self.dim_data[narrow<usize>(t - begin)] = olr;
 			self.offset_data[narrow<usize>(t - begin + 1)] =
@@ -184,7 +184,7 @@ struct tensor_view {
 	auto indiml() const -> i64 { return self.indiml; }
 	auto indimr() const -> i64 { return self.indimr; }
 	auto operator()(i64 i, i64 j, i64 k) const -> T& {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(i < self.outdim),
 				(j < self.indiml),
 				(k < self.indimr));
@@ -193,7 +193,7 @@ struct tensor_view {
 
 	void assign(tensor_view<value_type const> other) {
 		static_assert(!std::is_const<T>::value, "");
-		VEG_ASSERT_ALL_OF(
+		VEG_DEBUG_ASSERT_ALL_OF(
 				(self.outdim == other.self.outdim),
 				(self.indiml == other.self.indiml),
 				(self.indimr == other.self.indimr));
@@ -226,12 +226,13 @@ struct tensor_view {
 			view<value_type, colmat> out,
 			view<value_type const, colvec> v) const {
 
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(v.rows() == self.outdim),
 				(out.rows() == self.indiml),
 				(out.cols() == self.indimr));
 		if (out.rows() != 1) {
-			VEG_ASSERT_ELSE("non contiguous matrix", out.outerStride() == out.rows());
+			VEG_DEBUG_ASSERT_ELSE(
+					"non contiguous matrix", out.outerStride() == out.rows());
 		}
 
 		view<value_type const, colmat> //
@@ -241,7 +242,7 @@ struct tensor_view {
 				Eigen::Unaligned> //
 				out_(out.data(), 1, self.indiml * self.indimr);
 
-		eigen::tmul_add_to_noalias(out_, v, in_);
+		eigen::mul_add_to_noalias(out_, v.transpose(), in_);
 	}
 
 	auto has_nan() const -> bool {
@@ -277,13 +278,13 @@ struct tensor_seq_view {
 
 	struct layout {
 		idx::tensor_idx_view const idx;
-		slice<T> const data;
+		Slice<T> const data;
 	} self;
 
 	auto as_view() const -> tensor_seq_view { return *this; }
 
 	auto operator[](i64 t) const -> tensor_view<T> {
-		VEG_ASSERT_ALL_OF( //
+		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= self.idx.index_begin()),
 				(t < self.idx.index_end()));
 		return {

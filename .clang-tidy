@@ -1,5 +1,6 @@
 ---
 Checks:          '*,-abseil-*,-fuchsia-*,-google-*,-llvm-*,-zircon-*,
+                  -altera-struct-pack-align,
                   -cert-dcl21-cpp,
                   -clang-diagnostic-c++98-compat-pedantic,
                   -clang-diagnostic-unused-macros,

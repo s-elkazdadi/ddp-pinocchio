@@ -62,7 +62,7 @@ struct affine_function_seq {
 			view<scalar, colvec> out,
 			i64 t,
 			view<scalar const, colvec> in,
-			dynamic_stack_view stack) const {
+			DynStackView stack) const {
 		DDP_TMP_VECTOR_UNINIT(stack, tmp, scalar, self.jac[t].cols());
 
 		self.in.difference(tmp, t, self.origin[t], in, stack);
@@ -72,8 +72,8 @@ struct affine_function_seq {
 		}
 	}
 
-	void update_origin(
-			mat_seq<scalar, colvec> const& new_traj, dynamic_stack_view stack) {
+	void
+	update_origin(mat_seq<scalar, colvec> const& new_traj, DynStackView stack) {
 
 		auto begin = self.origin.index_begin();
 		auto end = self.origin.index_end();
@@ -127,15 +127,15 @@ struct constant_function_seq {
 			view<scalar, colvec> out,
 			i64 t,
 			view<scalar const, colvec> in,
-			dynamic_stack_view stack) const {
+			DynStackView stack) const {
 
-		(void)stack, (void)in, (void)t;
+		unused(stack, in, t);
 		eigen::assign(out, val[t]);
 	}
 
-	void update_origin(
-			mat_seq<scalar, colvec> const& new_traj, dynamic_stack_view stack) {
-		(void)this, (void)new_traj, (void)stack;
+	void
+	update_origin(mat_seq<scalar, colvec> const& new_traj, DynStackView stack) {
+		unused(this, new_traj, stack);
 	}
 };
 
