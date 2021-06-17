@@ -20,44 +20,44 @@ template <typename T>
 using max_ddim_expr = decltype(VEG_DECLVAL(T const&).max_ddim());
 
 template <typename T>
-using scalar_type_t = typename T::scalar;
+using scalar_type_t = typename T::Scalar;
 template <typename T>
 using integrate_expr = decltype(VEG_DECLVAL(T const&).integrate(
 
-		VEG_DECLVAL(view<scalar_type_t<T>, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T>, colvec>),
 		VEG_DECLVAL(i64),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
 		VEG_DECLVAL(DynStackView)
 
 				));
 template <typename T>
 using difference_expr = decltype(VEG_DECLVAL(T const&).difference(
 
-		VEG_DECLVAL(view<scalar_type_t<T>, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T>, colvec>),
 		VEG_DECLVAL(i64),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
 		VEG_DECLVAL(DynStackView)
 
 				));
 template <typename T>
 using dintegrate_expr = decltype(VEG_DECLVAL(T const&).dintegrate_d_base(
 
-		VEG_DECLVAL(view<scalar_type_t<T>, colmat>),
+		VEG_DECLVAL(View<scalar_type_t<T>, colmat>),
 		VEG_DECLVAL(i64),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
 		VEG_DECLVAL(DynStackView)
 
 				));
 template <typename T>
 using ddifference_expr = decltype(VEG_DECLVAL(T const&).d_difference_d_finish(
 
-		VEG_DECLVAL(view<scalar_type_t<T>, colmat>),
+		VEG_DECLVAL(View<scalar_type_t<T>, colmat>),
 		VEG_DECLVAL(i64),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
 		VEG_DECLVAL(DynStackView)
 
 				));
@@ -121,19 +121,19 @@ DDP_DEF_CONCEPT(
 DDP_DEF_CONCEPT(
 		typename T,
 		has_req_integrate,
-		VEG_CONCEPT(same<mem_req, veg::meta::detected_t<req_integrate_expr, T>>));
+		VEG_CONCEPT(same<MemReq, veg::meta::detected_t<req_integrate_expr, T>>));
 DDP_DEF_CONCEPT(
 		typename T,
 		has_req_dintegrate,
-		VEG_CONCEPT(same<mem_req, veg::meta::detected_t<req_dintegrate_expr, T>>));
+		VEG_CONCEPT(same<MemReq, veg::meta::detected_t<req_dintegrate_expr, T>>));
 DDP_DEF_CONCEPT(
 		typename T,
 		has_req_difference,
-		VEG_CONCEPT(same<mem_req, veg::meta::detected_t<req_difference_expr, T>>));
+		VEG_CONCEPT(same<MemReq, veg::meta::detected_t<req_difference_expr, T>>));
 DDP_DEF_CONCEPT(
 		typename T,
 		has_req_ddifference,
-		VEG_CONCEPT(same<mem_req, veg::meta::detected_t<req_ddifference_expr, T>>));
+		VEG_CONCEPT(same<MemReq, veg::meta::detected_t<req_ddifference_expr, T>>));
 } // namespace aux
 
 DDP_DEF_CONCEPT_CONJUNCTION(
@@ -160,35 +160,35 @@ DDP_DEF_CONCEPT_CONJUNCTION(
 } // namespace concepts
 
 template <typename Space>
-auto space_to_idx(Space space, i64 begin, i64 end) -> idx::idx<colvec> {
-	return {begin, end, [&](i64 t) { return idx::dims<colvec>{space.dim(t)}; }};
+auto space_to_idx(Space space, i64 begin, i64 end) -> idx::Idx<colvec> {
+	return {begin, end, [&](i64 t) { return idx::Dims<colvec>{space.dim(t)}; }};
 }
 
 template <typename T, typename Dim_Fn>
-struct basic_vector_space {
+struct BasicVectorSpace {
 	DDP_CHECK_CONCEPT(scalar<T>);
 	VEG_CHECK_CONCEPT(invocable_r<Dim_Fn, i64, i64>);
 
-	struct raw_parts {
+	struct Layout {
 		Dim_Fn dim;
 		i64 max_dim;
 	} self;
-	using scalar = T;
+	using Scalar = T;
 
 	auto dim(i64 t) const -> i64 { return self.dim(t); }
 	auto ddim(i64 t) const -> i64 { return self.dim(t); }
 	auto max_dim() const -> i64 { return self.max_dim; }
 	auto max_ddim() const -> i64 { return self.max_dim; }
 
-	auto integrate_req() const -> mem_req {
+	auto integrate_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	void integrate(
-			view<T, colvec> x_out,
+			View<T, colvec> x_out,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> dx,
+			View<T const, colvec> x,
+			View<T const, colvec> dx,
 			DynStackView stack) const {
 		unused(t, stack);
 		VEG_DEBUG_ASSERT_ALL_OF( //
@@ -198,16 +198,16 @@ struct basic_vector_space {
 		eigen::add_to(x_out, x, dx);
 	}
 
-	auto dintegrate_d_base_req() const -> mem_req {
+	auto dintegrate_d_base_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 
 	void dintegrate_d_base(
-			view<T, colmat> dx_out,
+			View<T, colmat> dx_out,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> dx,
+			View<T const, colvec> x,
+			View<T const, colvec> dx,
 			DynStackView stack) const {
 		unused(t, x, dx, stack);
 
@@ -220,16 +220,16 @@ struct basic_vector_space {
 		dx_out.setIdentity();
 	}
 
-	auto difference_req() const -> mem_req {
+	auto difference_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 
 	void difference(
-			view<T, colvec> out,
+			View<T, colvec> out,
 			i64 t,
-			view<T const, colvec> start,
-			view<T const, colvec> finish,
+			View<T const, colvec> start,
+			View<T const, colvec> finish,
 			DynStackView stack) const {
 
 		unused(t, stack);
@@ -241,16 +241,16 @@ struct basic_vector_space {
 		eigen::sub_to(out, finish, start);
 	}
 
-	auto d_difference_d_finish_req() const -> mem_req {
+	auto d_difference_d_finish_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 
 	void d_difference_d_finish(
-			view<T, colmat> out,
+			View<T, colmat> out,
 			i64 t,
-			view<T const, colvec> start,
-			view<T const, colvec> finish,
+			View<T const, colvec> start,
+			View<T const, colvec> finish,
 			DynStackView stack) const {
 
 		unused(t, start, finish, stack);
@@ -264,17 +264,17 @@ struct basic_vector_space {
 	}
 };
 
-struct constant_dim {
-	struct raw_parts {
+struct ConstDimVectorSpace {
+	struct Layout {
 		i64 dim;
 	} self;
 	auto operator()(i64 /*t*/) const noexcept -> i64 { return self.dim; }
 };
 
 template <typename T>
-struct vector_space : basic_vector_space<T, constant_dim> {
-	explicit vector_space(i64 dim) noexcept
-			: basic_vector_space<T, constant_dim>{{{{dim}}, dim}} {}
+struct VectorSpace : BasicVectorSpace<T, ConstDimVectorSpace> {
+	explicit VectorSpace(i64 dim) noexcept
+			: BasicVectorSpace<T, ConstDimVectorSpace>{{{{dim}}, dim}} {}
 };
 
 // pinocchio expects a zero'd matrix
@@ -283,8 +283,8 @@ template <typename T>
 struct pinocchio_state_space {
 	DDP_CHECK_CONCEPT(scalar<T>);
 
-	pinocchio::model<T> const& model;
-	using scalar = T;
+	pinocchio::Model<T> const& model;
+	using Scalar = T;
 
 	auto dim(i64 t) const -> i64 {
 		return unused(t), model.config_dim() + model.tangent_dim();
@@ -296,15 +296,15 @@ struct pinocchio_state_space {
 	}
 	auto max_ddim() const -> i64 { return 2 * model.tangent_dim(); }
 
-	auto integrate_req() const -> mem_req {
+	auto integrate_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	void integrate(
-			view<T, colvec> x_out,
+			View<T, colvec> x_out,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> dx,
+			View<T const, colvec> x,
+			View<T const, colvec> dx,
 			DynStackView stack) const {
 
 		unused(t, stack);
@@ -328,15 +328,15 @@ struct pinocchio_state_space {
 		eigen::add_to(xw_v, x_v, dx_v);
 	}
 
-	auto dintegrate_d_base_req() const -> mem_req {
+	auto dintegrate_d_base_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	void dintegrate_d_base(
-			view<T, colmat> dx_out,
+			View<T, colmat> dx_out,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> dx,
+			View<T const, colvec> x,
+			View<T const, colvec> dx,
 			DynStackView stack) const {
 
 		unused(t, stack);
@@ -369,15 +369,15 @@ struct pinocchio_state_space {
 		eigen::add_identity(dxw_vv);
 	}
 
-	auto difference_req() const -> mem_req {
+	auto difference_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	void difference(
-			view<T, colvec> out,
+			View<T, colvec> out,
 			i64 t,
-			view<T const, colvec> start,
-			view<T const, colvec> finish,
+			View<T const, colvec> start,
+			View<T const, colvec> finish,
 			DynStackView stack) const {
 
 		unused(t, stack);
@@ -403,15 +403,15 @@ struct pinocchio_state_space {
 		model.difference(out_q, start_q, finish_q);
 	}
 
-	auto d_difference_d_finish_req() const -> mem_req {
+	auto d_difference_d_finish_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	void d_difference_d_finish(
-			view<T, colmat> out,
+			View<T, colmat> out,
 			i64 t,
-			view<T const, colvec> start,
-			view<T const, colvec> finish,
+			View<T const, colvec> start,
+			View<T const, colvec> finish,
 			DynStackView stack) const {
 
 		unused(t, stack);

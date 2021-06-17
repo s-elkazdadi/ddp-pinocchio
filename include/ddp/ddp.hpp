@@ -12,7 +12,7 @@
 
 namespace ddp {
 namespace internal {
-struct thread_perf {
+struct ThreadPerf {
 	i64 total_duration;
 	i64 count;
 	bool use_threads;
@@ -23,20 +23,20 @@ struct thread_perf {
 };
 } // namespace internal
 
-enum struct mult_update_attempt_result_e {
+enum struct MultUpdateAttemptResult_e {
 	no_update,
 	update_success,
 	update_failure,
 	optimum_attained,
 };
 
-enum struct method {
+enum struct Method_e {
 	constant_multipliers,
 	affine_multipliers,
 };
 
 template <typename Scalar>
-struct regularization {
+struct Regularization {
 
 	void increase_reg() {
 		m_factor = std::max(Scalar{1}, m_factor) * m_factor_update;
@@ -66,39 +66,37 @@ struct regularization {
 };
 
 template <typename Dynamics, typename Cost, typename Constraint>
-struct ddp {
+struct Ddp {
 	Dynamics dynamics;
 	Cost cost;
 	Constraint constraint;
 
-	using scalar = typename meta::uncvref_t<Dynamics>::scalar;
-	using trajectory = ::ddp::trajectory<scalar>;
-	using key = decltype(VEG_DECLVAL(Dynamics const&).acquire_workspace());
+	using Scalar = typename meta::uncvref_t<Dynamics>::Scalar;
+	using trajectory = ::ddp::Trajectory<Scalar>;
+	using Key = decltype(VEG_DECLVAL(Dynamics const&).acquire_workspace());
 
-	using state_space = decltype(dynamics.state_space());
-	using control_space = decltype(dynamics.control_space());
-	using constraint_output_space =
-			decltype(constraint.ref(dynamics).output_space());
+	using StateSpace = decltype(dynamics.state_space());
+	using ControlSpace = decltype(dynamics.control_space());
+	using ConstraintOutSpace = decltype(constraint.ref(dynamics).output_space());
 
-	template <method K, typename = void>
-	struct multiplier_sequence;
+	template <Method_e K, typename = void>
+	struct MultiplierSeq;
 	template <typename Dummy>
-	struct multiplier_sequence<method::constant_multipliers, Dummy> {
-		using eq_type = internal::constant_function_seq<scalar>;
+	struct MultiplierSeq<Method_e::constant_multipliers, Dummy> {
+		using Eq = internal::ConstantFnSeq<Scalar>;
 
-		struct type {
-			eq_type eq;
+		struct Type {
+			Eq eq;
 		};
 
 		static auto zero(
-				state_space x_space,
-				constraint_output_space eq_space,
-				trajectory const& traj) -> type {
+				StateSpace x_space, ConstraintOutSpace eq_space, trajectory const& traj)
+				-> Type {
 
 			unused(traj, x_space);
 			auto begin = traj.index_begin();
 			auto end = traj.index_end();
-			auto multipliers = type{eq_type{begin, end, eq_space}};
+			auto multipliers = Type{Eq{begin, end, eq_space}};
 			for (i64 t = begin; t < end; ++t) {
 				multipliers.eq.self.val[t].setZero();
 			}
@@ -106,21 +104,20 @@ struct ddp {
 		}
 	};
 	template <typename Dummy>
-	struct multiplier_sequence<method::affine_multipliers, Dummy> {
-		using eq_type = internal::affine_function_seq<scalar, state_space>;
+	struct MultiplierSeq<Method_e::affine_multipliers, Dummy> {
+		using Eq = internal::AffineFnSeq<Scalar, StateSpace>;
 
-		struct type {
-			eq_type eq;
+		struct Type {
+			Eq eq;
 		};
 
 		static auto zero(
-				state_space x_space,
-				constraint_output_space eq_space,
-				trajectory const& traj) -> type {
+				StateSpace x_space, ConstraintOutSpace eq_space, trajectory const& traj)
+				-> Type {
 
 			auto begin = traj.index_begin();
 			auto end = traj.index_end();
-			auto multipliers = type{eq_type{begin, end, x_space, eq_space}};
+			auto multipliers = Type{Eq{begin, end, x_space, eq_space}};
 
 			for (i64 t = begin; t < end; ++t) {
 				auto& fn = multipliers.eq.self;
@@ -132,10 +129,10 @@ struct ddp {
 		}
 	};
 
-	template <method M>
+	template <Method_e M>
 	auto zero_multipliers(trajectory const& traj) const ->
-			typename multiplier_sequence<M>::type {
-		return multiplier_sequence<M>::zero(
+			typename MultiplierSeq<M>::Type {
+		return MultiplierSeq<M>::zero(
 				dynamics.state_space(), constraint.ref(dynamics).output_space(), traj);
 	}
 
@@ -143,7 +140,7 @@ struct ddp {
 	auto make_trajectory(
 			i64 begin,
 			i64 end,
-			view<scalar const, colvec> x_init,
+			View<Scalar const, colvec> x_init,
 			Control_Gen it_u) const -> trajectory {
 
 		trajectory traj{
@@ -172,45 +169,48 @@ struct ddp {
 		return traj;
 	}
 
-	using control_feedback = internal::affine_function_seq<scalar, state_space>;
-	using derivative_storage = internal::second_order_derivatives<scalar>;
-	using derivative_storage_base = internal::first_order_derivatives<scalar>;
+	using ControlFeedback = internal::AffineFnSeq<Scalar, StateSpace>;
+	using DerivativeStorage = internal::SecondOrderDerivatives<Scalar>;
+	using DerivativeStorageBase = internal::FirstOrderDerivatives<Scalar>;
 
 	auto make_derivative_storage(trajectory const& traj) const
-			-> internal::second_order_derivatives<scalar> {
+			-> internal::SecondOrderDerivatives<Scalar> {
 
 		i64 begin = traj.index_begin();
 		i64 end = traj.index_end();
 
-		using vecseq = internal::mat_seq<scalar, colvec>;
-		using matseq = internal::mat_seq<scalar, colmat>;
+		using vecseq = internal::MatSeq<Scalar, colvec>;
+		using matseq = internal::MatSeq<Scalar, colmat>;
 
-		idx::idx<colvec> idxx =
+		idx::Idx<colvec> idxx =
 				::ddp::space_to_idx(constraint.ref(dynamics).state_space(), begin, end);
-		idx::idx<colvec> idxu = ::ddp::space_to_idx(
+		idx::Idx<colvec> idxu = ::ddp::space_to_idx(
 				constraint.ref(dynamics).control_space(), begin, end);
-		idx::idx<colvec> idxe = ::ddp::space_to_idx(
+		idx::Idx<colvec> idxe = ::ddp::space_to_idx(
 				constraint.ref(dynamics).output_space(), begin, end);
 
 		auto x = idxx.as_view();
 		auto u = idxu.as_view();
 		auto e = idxe.as_view();
 
-		auto prod2 = [&](idx::idx_view<colvec> l, idx::idx_view<colvec> r) {
+		auto prod2 = [&](idx::IdxView<colvec> l, idx::IdxView<colvec> r) {
 			return matseq(idx::prod_idx(l, r));
 		};
-		auto prod3 = [&](idx::idx_view<colvec> o,
-		                 idx::idx_view<colvec> l,
-		                 idx::idx_view<colvec> r) {
-			return internal::tensor_seq<scalar>(
-					idx::tensor_idx(begin, end, [&](i64 t) -> idx::tensor_dims {
+		auto prod3 = [&](idx::IdxView<colvec> o,
+		                 idx::IdxView<colvec> l,
+		                 idx::IdxView<colvec> r) {
+			return internal::TensorSeq<Scalar>(
+					idx::TensorIdx(begin, end, [&](i64 t) -> idx::TensorDims {
 						return {o.rows(t), l.rows(t), r.rows(t)};
 					}));
 		};
 
-		return internal::second_order_derivatives<scalar>{
-				{{
-						{traj.x_f().rows()},
+		return internal::SecondOrderDerivatives<Scalar>{
+				{
+						eigen::HeapMatrix<Scalar, colvec>{
+								eigen::with_dims,
+								traj.x_f().rows(),
+						},
 
 						vecseq(idxx),
 						vecseq(idxu),
@@ -222,10 +222,14 @@ struct ddp {
 						vecseq(idxe),
 						prod2(e, x),
 						prod2(e, u),
-				}},
+				},
 
 				{
-						{traj.x_f().rows(), traj.x_f().rows()},
+						eigen::HeapMatrix<Scalar, colmat>{
+								eigen::with_dims,
+								traj.x_f().rows(),
+								traj.x_f().rows(),
+						},
 
 						prod2(x, x),
 						prod2(u, x),
@@ -238,33 +242,34 @@ struct ddp {
 						prod3(e, x, x),
 						prod3(e, u, x),
 						prod3(e, u, u),
-				}};
+				},
+		};
 	}
 
-	auto optimality_constr(derivative_storage const& derivs) const -> scalar {
+	auto optimality_constr(DerivativeStorage const& derivs) const -> Scalar {
 		using std::max;
-		scalar retval(0);
-		auto const& eq = derivs.first_order_derivatives::self.eq;
+		Scalar retval(0);
+		auto const& eq = derivs.FirstOrderDerivatives::self.eq;
 		for (i64 t = eq.index_begin(); t < eq.index_end(); ++t) {
 			retval = max(retval, derivs.eq(t).stableNorm());
 		}
 		return retval;
 	}
 
-	template <typename Mult_Seq>
-	auto optimality_obj_req(Mult_Seq const& mults) const -> mem_req {
-		return mem_req::sum_of({
+	template <typename MultSeq>
+	auto optimality_obj_req(MultSeq const& mults) const -> MemReq {
+		return MemReq::sum_of({
 				as_ref,
 				{
-						mem_req{
-								tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
-						mem_req{
-								tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
-						mem_req{
-								tag<scalar>,
+						MemReq{
+								tag<Scalar>, constraint.ref(dynamics).state_space().max_ddim()},
+						MemReq{
+								tag<Scalar>, constraint.ref(dynamics).state_space().max_ddim()},
+						MemReq{
+								tag<Scalar>,
 								constraint.ref(dynamics).output_space().max_ddim()},
-						mem_req{
-								tag<scalar>,
+						MemReq{
+								tag<Scalar>,
 								constraint.ref(dynamics).control_space().max_ddim()},
 						mults.eq.eval_to_req(),
 				},
@@ -275,23 +280,23 @@ struct ddp {
 	auto optimality_obj(
 			trajectory const& traj,
 			Mult_Seq const& mults,
-			scalar const& mu,
-			derivative_storage const& derivs,
-			DynStackView stack) const -> scalar {
+			Scalar const& mu,
+			DerivativeStorage const& derivs,
+			DynStackView stack) const -> Scalar {
 
 		using std::max;
 
-		scalar retval = 0;
+		Scalar retval = 0;
 
 		DDP_TMP_VECTOR_UNINIT(
 				stack,
 				adj_storage,
-				scalar,
+				Scalar,
 				constraint.ref(dynamics).state_space().max_ddim());
 		DDP_TMP_VECTOR_UNINIT(
 				stack,
 				adj_storage_2,
-				scalar,
+				Scalar,
 				constraint.ref(dynamics).state_space().max_ddim());
 
 		eigen::assign(
@@ -301,12 +306,12 @@ struct ddp {
 		DDP_TMP_VECTOR_UNINIT(
 				stack,
 				pe_storage,
-				scalar,
+				Scalar,
 				constraint.ref(dynamics).output_space().max_ddim());
 		DDP_TMP_VECTOR_UNINIT(
 				stack,
 				lu_storage,
-				scalar,
+				Scalar,
 				constraint.ref(dynamics).control_space().max_ddim());
 
 		for (i64 t = traj.index_end() - 1; t >= traj.index_begin(); --t) {
@@ -360,8 +365,8 @@ struct ddp {
 	}
 	template <typename Mults>
 	auto update_derivatives_req(
-			control_feedback const& fb_seq, Mults const& mults) const -> mem_req {
-		return mem_req::max_of({
+			ControlFeedback const& fb_seq, Mults const& mults) const -> MemReq {
+		return MemReq::max_of({
 				as_ref,
 				{
 						internal::compute_second_derivatives_req(
@@ -375,17 +380,17 @@ struct ddp {
 
 	template <typename Mults>
 	auto update_derivatives(
-			derivative_storage& derivs,
-			control_feedback& fb_seq,
+			DerivativeStorage& derivs,
+			ControlFeedback& fb_seq,
 			Mults& mults,
 			trajectory const& traj,
-			scalar mu,
-			scalar w,
-			scalar n,
-			scalar stopping_threshold,
+			Scalar mu,
+			Scalar w,
+			Scalar n,
+			Scalar stopping_threshold,
 			DynStackView stack,
-			internal::thread_perf& threading_method) const
-			-> Tuple<mult_update_attempt_result_e, scalar, scalar> {
+			internal::ThreadPerf& threading_method) const
+			-> Tuple<MultUpdateAttemptResult_e, Scalar, Scalar> {
 
 		threading_method.total_duration += internal::compute_second_derivatives(
 				derivs,
@@ -405,7 +410,7 @@ struct ddp {
 		if (opt_constr < stopping_threshold and opt_obj < stopping_threshold) {
 			return {
 					direct,
-					mult_update_attempt_result_e::optimum_attained,
+					MultUpdateAttemptResult_e::optimum_attained,
 					opt_obj,
 					opt_constr,
 			};
@@ -425,14 +430,14 @@ struct ddp {
 				}
 				return {
 						direct,
-						mult_update_attempt_result_e::update_success,
+						MultUpdateAttemptResult_e::update_success,
 						opt_obj,
 						opt_constr,
 				};
 			} else {
 				return {
 						direct,
-						mult_update_attempt_result_e::update_failure,
+						MultUpdateAttemptResult_e::update_failure,
 						opt_obj,
 						opt_constr,
 				};
@@ -440,23 +445,23 @@ struct ddp {
 		} else {
 			return {
 					direct,
-					mult_update_attempt_result_e::no_update,
+					MultUpdateAttemptResult_e::no_update,
 					opt_obj,
 					opt_constr,
 			};
 		}
 	}
 
-	template <method M>
+	template <Method_e M>
 	auto solve(
 			i64 max_iterations,
-			scalar optimality_stopping_threshold,
-			scalar mu,
-			trajectory traj) -> Tuple<trajectory, control_feedback> {
+			Scalar optimality_stopping_threshold,
+			Scalar mu,
+			trajectory traj) -> Tuple<trajectory, ControlFeedback> {
 
 		auto mult = zero_multipliers<M>(traj);
-		auto reg = regularization<scalar>{0, 1, 2, 1e-5};
-		auto ctrl = control_feedback(
+		auto reg = Regularization<Scalar>{0, 1, 2, 1e-5};
+		auto ctrl = ControlFeedback(
 				traj.index_begin(),
 				traj.index_end(),
 				dynamics.state_space(),
@@ -467,15 +472,15 @@ struct ddp {
 
 		using std::pow;
 
-		scalar previous_opt_constr{};
-		scalar w = 1 / mu;
-		scalar n = 1 / pow(mu, static_cast<scalar>(0.1L));
+		Scalar previous_opt_constr{};
+		Scalar w = 1 / mu;
+		Scalar n = 1 / pow(mu, static_cast<Scalar>(0.1L));
 
-		mem_req req = //
-				mem_req::max_of({
+		MemReq req = //
+				MemReq::max_of({
 						as_ref,
 						{
-								mem_req::sum_of({
+								MemReq::sum_of({
 										as_ref,
 										{
 												update_derivatives_req(ctrl, mult),
@@ -495,12 +500,11 @@ struct ddp {
 
 		DynStackView stack(slice::from_range(stack_storage));
 
-		internal::thread_perf single{0, 0, false};
-		internal::thread_perf multi{0, 0, true};
+		internal::ThreadPerf single{0, 0, false};
+		internal::ThreadPerf multi{0, 0, true};
 		for (i64 i = 0; i < max_iterations; ++i) {
 
-			internal::thread_perf& threading_method =
-					[&]() -> internal::thread_perf& {
+			internal::ThreadPerf& threading_method = [&]() -> internal::ThreadPerf& {
 				if (multi.count < 5) {
 					return multi;
 				}
@@ -540,12 +544,12 @@ struct ddp {
 								threading_method)));
 				unused(opt_obj);
 
-				scalar const beta = 0.5;
+				Scalar const beta = 0.5;
 				switch (mult_update_rv) {
-				case mult_update_attempt_result_e::no_update: {
+				case MultUpdateAttemptResult_e::no_update: {
 					break;
 				}
-				case mult_update_attempt_result_e::update_failure: {
+				case MultUpdateAttemptResult_e::update_failure: {
 					using std::pow;
 					::fmt::print(
 							"desired new mu {}\n",
@@ -554,18 +558,18 @@ struct ddp {
 												std::min( //
 														pow(mu / (previous_opt_constr / opt_constr),
 					                      1.0 / (1 - beta)),
-														mu * scalar{1e5}),
+														mu * Scalar{1e5}),
 												mu);
 					break;
 				}
-				case mult_update_attempt_result_e::update_success: {
+				case MultUpdateAttemptResult_e::update_success: {
 					using std::pow;
 					n = opt_constr / pow(mu, beta / 2);
-					w = std::max(w / pow(mu, scalar{1}), n / mu);
+					w = std::max(w / pow(mu, Scalar{1}), n / mu);
 					previous_opt_constr = opt_constr;
 					break;
 				}
-				case mult_update_attempt_result_e::optimum_attained:
+				case MultUpdateAttemptResult_e::optimum_attained:
 					return {
 							direct,
 							VEG_FWD(traj),
@@ -619,29 +623,29 @@ struct ddp {
 		};
 	}
 
-	auto bwd_pass_req() const noexcept -> mem_req {
+	auto bwd_pass_req() const noexcept -> MemReq {
 		i64 nf = dynamics.output_space().max_ddim();
 		i64 nx = dynamics.state_space().max_ddim();
 		i64 nu = constraint.ref(dynamics).control_space().max_ddim();
 		i64 ne = constraint.ref(dynamics).output_space().max_ddim();
-		return mem_req::sum_of({
+		return MemReq::sum_of({
 				as_ref,
 				{
-						{tag<scalar>, nf},      // vx
-						{tag<scalar>, nf * nf}, // vxx
-						{tag<scalar>, ne},      // tmp
-						{tag<scalar>, ne * nx}, // tmp2
-						{tag<scalar>, nx},      // qx
-						{tag<scalar>, nu},      // qu
-						{tag<scalar>, nx * nx}, // qxx
-						{tag<scalar>, nu * nu}, // quu
-						{tag<scalar>, nu * nx}, // qux
-						mem_req::max_of({
+						{tag<Scalar>, nf},      // vx
+						{tag<Scalar>, nf * nf}, // vxx
+						{tag<Scalar>, ne},      // tmp
+						{tag<Scalar>, ne * nx}, // tmp2
+						{tag<Scalar>, nx},      // qx
+						{tag<Scalar>, nu},      // qu
+						{tag<Scalar>, nx * nx}, // qxx
+						{tag<Scalar>, nu * nu}, // quu
+						{tag<Scalar>, nu * nx}, // qux
+						MemReq::max_of({
 								as_ref,
 								{
-										{tag<scalar>, nf * nx}, // tmp (qxx/qux)
-										{tag<scalar>, nf * nu}, // tmp (quu)
-										{tag<scalar>, nu * nu}, // quu_clone
+										{tag<Scalar>, nf * nx}, // tmp (qxx/qux)
+										{tag<Scalar>, nf * nu}, // tmp (quu)
+										{tag<Scalar>, nu * nu}, // quu_clone
 								},
 						}),
 				},
@@ -649,24 +653,24 @@ struct ddp {
 	}
 	template <typename Mults>
 	auto bwd_pass(
-			control_feedback& control_feedback,
-			regularization<scalar>& reg,
-			scalar mu,
+			ControlFeedback& control_feedback,
+			Regularization<Scalar>& reg,
+			Scalar mu,
 			trajectory const& current_traj,
 			Mults const& mults,
-			derivative_storage const& derivatives,
-			DynStackView stack) const -> scalar {
+			DerivativeStorage const& derivatives,
+			DynStackView stack) const -> Scalar {
 
 		bool success = false;
 
-		scalar expected_decrease = 0;
+		Scalar expected_decrease = 0;
 		while (!success) {
 			::fmt::print("mu: {}\n", mu);
 
 			i64 nxf = derivatives.lfx().rows();
 
-			DDP_TMP_MATRIX_UNINIT(stack, V_xx, scalar, nxf, nxf);
-			DDP_TMP_VECTOR_UNINIT(stack, V_x, scalar, nxf);
+			DDP_TMP_MATRIX_UNINIT(stack, V_xx, Scalar, nxf, nxf);
+			DDP_TMP_VECTOR_UNINIT(stack, V_x, Scalar, nxf);
 
 			eigen::assign(V_xx, derivatives.lfxx());
 			eigen::assign(V_x, derivatives.lfx());
@@ -701,8 +705,8 @@ struct ddp {
 				auto pe = mults.eq.self.val[t];
 				auto pe_x = mults.eq.self.jac[t];
 
-				DDP_TMP_VECTOR_UNINIT(stack, tmp, scalar, pe.rows());
-				DDP_TMP_MATRIX_UNINIT(stack, tmp2, scalar, pe.rows(), pe_x.cols());
+				DDP_TMP_VECTOR_UNINIT(stack, tmp, Scalar, pe.rows());
+				DDP_TMP_MATRIX_UNINIT(stack, tmp2, Scalar, pe.rows(), pe_x.cols());
 
 				eigen::assign(tmp, pe);
 				eigen::mul_scalar_add_to(tmp, eq_, mu);
@@ -720,7 +724,7 @@ struct ddp {
 							!pe_x.hasNaN());
 				}
 
-				DDP_TMP_VECTOR_UNINIT(stack, Q_x, scalar, lx.rows());
+				DDP_TMP_VECTOR_UNINIT(stack, Q_x, Scalar, lx.rows());
 				eigen::assign(Q_x, lx);
 				eigen::mul_add_to_noalias(Q_x, fx.transpose(), v_x);
 				if (has_eq) {
@@ -728,17 +732,17 @@ struct ddp {
 					eigen::mul_add_to_noalias(Q_x, pe_x.transpose(), eq_);
 				}
 
-				DDP_TMP_VECTOR_UNINIT(stack, Q_u, scalar, lu.rows());
+				DDP_TMP_VECTOR_UNINIT(stack, Q_u, Scalar, lu.rows());
 				eigen::assign(Q_u, lu);
 				eigen::mul_add_to_noalias(Q_u, fu.transpose(), v_x);
 				if (has_eq) {
 					eigen::mul_add_to_noalias(Q_u, equ.transpose(), tmp);
 				}
 
-				DDP_TMP_MATRIX_UNINIT(stack, Q_xx, scalar, lxx.rows(), lxx.rows());
+				DDP_TMP_MATRIX_UNINIT(stack, Q_xx, Scalar, lxx.rows(), lxx.rows());
 				eigen::assign(Q_xx, lxx);
 				{
-					DDP_TMP_MATRIX(stack, tmp_prod, scalar, V_xx.rows(), fx.cols());
+					DDP_TMP_MATRIX(stack, tmp_prod, Scalar, V_xx.rows(), fx.cols());
 					eigen::mul_add_to_noalias(tmp_prod, V_xx, fx);
 					eigen::mul_add_to_noalias(Q_xx, fx.transpose(), tmp_prod);
 				}
@@ -750,10 +754,10 @@ struct ddp {
 				}
 				fxx.noalias_contract_add_outdim(eigen::as_mut(Q_xx), v_x);
 
-				DDP_TMP_MATRIX_UNINIT(stack, Q_uu, scalar, luu.rows(), luu.rows());
+				DDP_TMP_MATRIX_UNINIT(stack, Q_uu, Scalar, luu.rows(), luu.rows());
 				eigen::assign(Q_uu, luu);
 				{
-					DDP_TMP_MATRIX(stack, tmp_prod, scalar, V_xx.rows(), fu.cols());
+					DDP_TMP_MATRIX(stack, tmp_prod, Scalar, V_xx.rows(), fu.cols());
 					eigen::mul_add_to_noalias(tmp_prod, V_xx, fu);
 					eigen::mul_add_to_noalias(Q_uu, fu.transpose(), tmp_prod);
 				}
@@ -764,10 +768,10 @@ struct ddp {
 				}
 				fuu.noalias_contract_add_outdim(eigen::as_mut(Q_uu), v_x);
 
-				DDP_TMP_MATRIX_UNINIT(stack, Q_ux, scalar, lux.rows(), lux.cols());
+				DDP_TMP_MATRIX_UNINIT(stack, Q_ux, Scalar, lux.rows(), lux.cols());
 				eigen::assign(Q_ux, lux);
 				{
-					DDP_TMP_MATRIX(stack, tmp_prod, scalar, V_xx.rows(), fx.cols());
+					DDP_TMP_MATRIX(stack, tmp_prod, Scalar, V_xx.rows(), fx.cols());
 					eigen::mul_add_to_noalias(tmp_prod, V_xx, fx);
 					eigen::mul_add_to_noalias(Q_ux, fu.transpose(), tmp_prod);
 				}
@@ -783,11 +787,11 @@ struct ddp {
 
 				{
 					DDP_TMP_MATRIX_UNINIT(
-							stack, Q_uu_clone, scalar, Q_uu.rows(), Q_uu.rows());
+							stack, Q_uu_clone, Scalar, Q_uu.rows(), Q_uu.rows());
 					eigen::assign(Q_uu_clone, Q_uu);
 					eigen::add_identity(Q_uu_clone, *reg);
 
-					Eigen::LLT<eigen::view<scalar, colmat>> llt_res(Q_uu_clone);
+					Eigen::LLT<eigen::View<Scalar, colmat>> llt_res(Q_uu_clone);
 
 					if (!(llt_res.info() == Eigen::ComputationInfo::Success)) {
 						reg.increase_reg();
@@ -806,7 +810,7 @@ struct ddp {
 				::fmt::print("{}\n", k);
 
 				{
-					DDP_TMP_VECTOR(stack, dotk, scalar, Q_uu.rows());
+					DDP_TMP_VECTOR(stack, dotk, Scalar, Q_uu.rows());
 					eigen::mul_add_to_noalias(dotk, Q_uu, k);
 					expected_decrease += 0.5 * eigen::dot(k, dotk);
 				}
@@ -827,17 +831,17 @@ struct ddp {
 
 	template <typename Mults>
 	auto fwd_pass_req(trajectory const& traj, Mults const& mults) const
-			-> mem_req {
-		return mem_req::sum_of({
+			-> MemReq {
+		return MemReq::sum_of({
 				as_ref,
 				{
-						mem_req{
-								tag<scalar>, 2 * (traj.index_end() - traj.index_begin() + 1)},
+						MemReq{
+								tag<Scalar>, 2 * (traj.index_end() - traj.index_begin() + 1)},
 						cost_seq_aug_req(mults),
-						mem_req{
-								tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
+						MemReq{
+								tag<Scalar>, constraint.ref(dynamics).state_space().max_ddim()},
 
-						mem_req::max_of({
+						MemReq::max_of({
 								as_ref,
 								{
 										dynamics.state_space().difference_req(),
@@ -854,17 +858,17 @@ struct ddp {
 			trajectory& new_traj_storage,
 			trajectory const& reference_traj,
 			Mults const& old_mults,
-			control_feedback const& feedback,
-			scalar mu,
-			key k,
+			ControlFeedback const& feedback,
+			Scalar mu,
+			Key k,
 			DynStackView stack,
-			bool do_linesearch = true) const -> Tuple<key, scalar> {
+			bool do_linesearch = true) const -> Tuple<Key, Scalar> {
 
 		auto begin = reference_traj.index_begin();
 		auto end = reference_traj.index_end();
 
-		DDP_TMP_VECTOR(stack, costs_old_traj, scalar, end - begin + 1);
-		DDP_TMP_VECTOR(stack, costs_new_traj, scalar, end - begin + 1);
+		DDP_TMP_VECTOR(stack, costs_old_traj, Scalar, end - begin + 1);
+		DDP_TMP_VECTOR(stack, costs_new_traj, Scalar, end - begin + 1);
 
 		if (do_linesearch) {
 			k = cost_seq_aug(
@@ -876,11 +880,11 @@ struct ddp {
 					stack);
 		}
 
-		scalar step = 1;
+		Scalar step = 1;
 		bool success = false;
 
 		DDP_TMP_VECTOR(
-				stack, tmp, scalar, constraint.ref(dynamics).state_space().max_ddim());
+				stack, tmp, Scalar, constraint.ref(dynamics).state_space().max_ddim());
 
 		while (!success) {
 			if (step < 1e-10) {
@@ -939,16 +943,16 @@ struct ddp {
 	}
 
 	template <typename Mults>
-	auto cost_seq_aug_req(Mults const& mults) const -> mem_req {
-		return mem_req::sum_of({
+	auto cost_seq_aug_req(Mults const& mults) const -> MemReq {
+		return MemReq::sum_of({
 				as_ref,
 				{
-						mem_req{
-								tag<scalar>, constraint.ref(dynamics).output_space().max_dim()},
-						mem_req{
-								tag<scalar>, constraint.ref(dynamics).output_space().max_dim()},
+						MemReq{
+								tag<Scalar>, constraint.ref(dynamics).output_space().max_dim()},
+						MemReq{
+								tag<Scalar>, constraint.ref(dynamics).output_space().max_dim()},
 
-						mem_req::max_of({
+						MemReq::max_of({
 								as_ref,
 								{
 										cost.ref(dynamics).eval_req(),
@@ -962,17 +966,17 @@ struct ddp {
 
 	template <typename Mults>
 	auto cost_seq_aug(
-			eigen::view<scalar, colvec> out,
+			View<Scalar, colvec> out,
 			trajectory const& traj,
 			Mults const& mults,
-			scalar mu,
-			key k,
-			DynStackView stack) const -> key {
+			Scalar mu,
+			Key k,
+			DynStackView stack) const -> Key {
 
 		auto csp = constraint.ref(dynamics).output_space();
 
-		DDP_TMP_VECTOR_UNINIT(stack, ce_storage, scalar, csp.max_dim());
-		DDP_TMP_VECTOR_UNINIT(stack, pe_storage, scalar, csp.max_dim());
+		DDP_TMP_VECTOR_UNINIT(stack, ce_storage, Scalar, csp.max_dim());
+		DDP_TMP_VECTOR_UNINIT(stack, pe_storage, Scalar, csp.max_dim());
 
 		for (i64 t = traj.index_begin(); t < traj.index_end(); ++t) {
 			VEG_BIND(auto, (x, u), traj[t]);
@@ -1000,13 +1004,12 @@ struct ddp {
 	}
 };
 
-namespace make {
-namespace fn {
-struct ddp_fn {
+namespace nb {
+struct ddp {
 	template <typename Dynamics, typename Cost, typename Constraint>
 	auto
 	operator()(Dynamics&& dynamics, Cost&& cost, Constraint&& constraint) const
-			-> ::ddp::ddp<Dynamics, Cost, Constraint> {
+			-> Ddp<Dynamics, Cost, Constraint> {
 		return {
 				VEG_FWD(dynamics),
 				VEG_FWD(cost),
@@ -1014,9 +1017,8 @@ struct ddp_fn {
 		};
 	}
 };
-} // namespace fn
-VEG_INLINE_VAR(ddp, fn::ddp_fn);
-} // namespace make
+} // namespace nb
+VEG_NIEBLOID(ddp);
 
 } // namespace ddp
 

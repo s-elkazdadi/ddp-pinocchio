@@ -29,17 +29,17 @@ namespace meta {
 using namespace veg::meta;
 } // namespace meta
 
-struct mem_req {
+struct MemReq {
 	i64 align;
 	i64 size;
 	template <typename T>
-	constexpr mem_req(Tag<T> /*unused*/, i64 n) noexcept
+	constexpr MemReq(Tag<T> /*unused*/, i64 n) noexcept
 			: align{alignof(T)}, size{narrow<i64>(sizeof(T)) * n} {}
 
-	constexpr mem_req(i64 al, i64 bytes) noexcept : align{al}, size{bytes} {}
+	constexpr MemReq(i64 al, i64 bytes) noexcept : align{al}, size{bytes} {}
 
-	static constexpr auto sum_of(Slice<mem_req const> arr) -> mem_req {
-		mem_req m = {1, 0};
+	static constexpr auto sum_of(Slice<MemReq const> arr) -> MemReq {
+		MemReq m = {1, 0};
 		for (auto const* p = arr.data(); p < arr.data() + arr.size(); ++p) {
 			m.size += p->size;
 			m.align = (p->align > m.align) ? p->align : m.align;
@@ -47,23 +47,14 @@ struct mem_req {
 		return m;
 	}
 
-	static constexpr auto max_of(Slice<mem_req const> arr) -> mem_req {
-		mem_req m = {1, 0};
+	static constexpr auto max_of(Slice<MemReq const> arr) -> MemReq {
+		MemReq m = {1, 0};
 		for (auto const* p = arr.data(); p < arr.data() + arr.size(); ++p) {
 			m.size = (p->size > m.size) ? p->size : m.size;
 			m.align = (p->align > m.align) ? p->align : m.align;
 		}
 		return m;
 	}
-};
-
-struct move_only {
-	move_only() = default;
-	~move_only();
-	move_only(move_only&&) noexcept = default;
-	auto operator=(move_only&&) noexcept -> move_only& = default;
-	move_only(move_only const&) noexcept = delete;
-	auto operator=(move_only const&) noexcept -> move_only& = delete;
 };
 } // namespace ddp
 

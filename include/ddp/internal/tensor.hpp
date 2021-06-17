@@ -9,16 +9,18 @@
 namespace ddp {
 namespace idx {
 
-struct tensor_dims {
-	i64 out_, left_, right_;
-	auto out() const -> i64 { return out_; }
-	auto left() const -> i64 { return left_; }
-	auto right() const -> i64 { return right_; }
+struct TensorDims {
+	struct Layout {
+		i64 out, left, right;
+	} self;
+	auto out() const -> i64 { return self.out; }
+	auto left() const -> i64 { return self.left; }
+	auto right() const -> i64 { return self.right; }
 };
 
 namespace internal {
 
-struct tensor_layout {
+struct TensorLayout {
 	i64 begin;
 	i64 end;
 	i64 max_out;
@@ -26,9 +28,9 @@ struct tensor_layout {
 	i64 max_right;
 };
 template <typename Idx>
-struct tensor_idx_view_base {
+struct TensorIdxViewBase {
 	auto derived() const -> Idx const& { return static_cast<Idx const&>(*this); }
-	auto dim_data() const -> Slice<tensor_dims const> {
+	auto dim_data() const -> Slice<TensorDims const> {
 		return {
 				from_raw_parts,
 				derived().dim_data(),
@@ -45,8 +47,8 @@ struct tensor_idx_view_base {
 		};
 	}
 
-	using layout = internal::tensor_layout;
-	layout const self;
+	using Layout = internal::TensorLayout;
+	Layout self;
 
 	auto index_begin() const -> i64 { return self.begin; }
 	auto index_end() const -> i64 { return self.end; }
@@ -80,46 +82,46 @@ struct tensor_idx_view_base {
 
 } // namespace internal
 
-struct tensor_idx_view : internal::tensor_idx_view_base<tensor_idx_view> {
-	using base = internal::tensor_idx_view_base<tensor_idx_view>;
-	struct layout {
-		tensor_dims const* const dim_data;
+struct TensorIdxView : internal::TensorIdxViewBase<TensorIdxView> {
+	using Base = internal::TensorIdxViewBase<TensorIdxView>;
+	struct Layout {
+		TensorDims const* const dim_data;
 		i64 const* const offset_data;
 	} self;
 
 	auto dim_data() const { return self.dim_data; }
 	auto offset_data() const { return self.offset_data; }
 
-	tensor_idx_view(typename base::layout b, layout s) : base{b}, self{s} {}
+	TensorIdxView(typename Base::Layout b, Layout s) : Base{b}, self{s} {}
 
-	auto as_view() const -> tensor_idx_view { return *this; }
+	auto as_view() const -> TensorIdxView { return *this; }
 
-	using base::index_begin;
-	using base::index_end;
-	using base::required_memory;
-	using base::offset;
-	using base::out;
-	using base::left;
-	using base::right;
+	using Base::index_begin;
+	using Base::index_end;
+	using Base::required_memory;
+	using Base::offset;
+	using Base::out;
+	using Base::left;
+	using Base::right;
 };
 
-struct tensor_idx : internal::tensor_idx_view_base<tensor_idx> {
-	using base = internal::tensor_idx_view_base<tensor_idx>;
-	friend struct internal::tensor_idx_view_base<tensor_idx>;
-	struct layout {
-		std::vector<tensor_dims> dim_data;
+struct TensorIdx : internal::TensorIdxViewBase<TensorIdx> {
+	using Base = internal::TensorIdxViewBase<TensorIdx>;
+	friend struct internal::TensorIdxViewBase<TensorIdx>;
+	struct Layout {
+		std::vector<TensorDims> dim_data;
 		std::vector<i64> offset_data;
 	} self;
 
 	auto dim_data() const { return self.dim_data.data(); }
 	auto offset_data() const { return self.offset_data.data(); }
 
-	tensor_idx(typename base::layout b, layout s) : base{b}, self{VEG_FWD(s)} {}
+	TensorIdx(typename Base::Layout b, Layout s) : Base{b}, self{VEG_FWD(s)} {}
 
 	template <typename Fn>
-	static auto make(i64 begin, i64 end, Fn dims) -> tensor_idx {
-		typename base::layout b{begin, end, 0, 0, 0};
-		layout self{{}, {}};
+	static auto make(i64 begin, i64 end, Fn dims) -> TensorIdx {
+		typename Base::Layout b{begin, end, 0, 0, 0};
+		Layout self{{}, {}};
 
 		self.offset_data.resize(narrow<usize>(b.end - b.begin + 1));
 		self.dim_data.resize(narrow<usize>(b.end - b.begin));
@@ -129,7 +131,7 @@ struct tensor_idx : internal::tensor_idx_view_base<tensor_idx> {
 		i64& maxright = b.max_right;
 		for (i64 t = begin; t < b.end; ++t) {
 
-			tensor_dims olr = dims(t);
+			TensorDims olr = dims(t);
 			i64 o = olr.out();
 			i64 l = olr.left();
 			i64 r = olr.right();
@@ -150,28 +152,27 @@ struct tensor_idx : internal::tensor_idx_view_base<tensor_idx> {
 public:
 	VEG_TEMPLATE(
 			typename Fn,
-			requires(VEG_CONCEPT(same<
-													 tensor_dims,
-													 meta::detected_t<meta::invoke_result_t, Fn&, i64>>)),
-			tensor_idx,
+			requires(VEG_CONCEPT(
+					same<TensorDims, meta::detected_t<meta::invoke_result_t, Fn&, i64>>)),
+			TensorIdx,
 			(begin, i64),
 			(end, i64),
 			(dims, Fn))
-			: tensor_idx(make(begin, end, VEG_FWD(dims))) {}
+			: TensorIdx(make(begin, end, VEG_FWD(dims))) {}
 
-	auto as_view() const -> tensor_idx_view {
+	auto as_view() const -> TensorIdxView {
 		return {
-				static_cast<base const&>(*this).self,
+				static_cast<Base const&>(*this).self,
 				{self.dim_data.data(), self.offset_data.data()}};
 	}
 
-	using base::index_begin;
-	using base::index_end;
-	using base::required_memory;
-	using base::offset;
-	using base::out;
-	using base::left;
-	using base::right;
+	using Base::index_begin;
+	using Base::index_end;
+	using Base::required_memory;
+	using Base::offset;
+	using Base::out;
+	using Base::left;
+	using Base::right;
 };
 
 } // namespace idx
@@ -179,8 +180,8 @@ public:
 namespace tensor {
 
 template <typename T>
-struct tensor_view {
-	struct layout {
+struct TensorView {
+	struct Layout {
 		T* data;
 		i64 outdim;
 		i64 indiml;
@@ -201,7 +202,7 @@ struct tensor_view {
 		return self.data[i + j * self.outdim + k * self.outdim * self.indiml];
 	}
 
-	void assign(tensor_view<value_type const> other) {
+	void assign(TensorView<value_type const> other) {
 		static_assert(!std::is_const<T>::value, "");
 		VEG_DEBUG_ASSERT_ALL_OF(
 				(self.outdim == other.self.outdim),
@@ -233,8 +234,8 @@ struct tensor_view {
 	}
 
 	void noalias_contract_add_outdim( //
-			view<value_type, colmat> out,
-			view<value_type const, colvec> v) const {
+			View<value_type, colmat> out,
+			View<value_type const, colvec> v) const {
 
 		VEG_DEBUG_ASSERT_ALL_OF( //
 				(v.rows() == self.outdim),
@@ -245,7 +246,7 @@ struct tensor_view {
 					"non contiguous matrix", out.outerStride() == out.rows());
 		}
 
-		view<value_type const, colmat> //
+		View<value_type const, colmat> //
 				in_(self.data, self.outdim, self.indiml * self.indimr, self.outdim);
 		Eigen::Map<
 				Eigen::Matrix<value_type, 1, -1, Eigen::RowMajor>,
@@ -279,21 +280,21 @@ struct tensor_view {
 };
 
 } // namespace tensor
-using tensor::tensor_view;
+using tensor::TensorView;
 
 namespace internal {
 
 template <typename T>
-struct tensor_seq_view {
+struct TensorSeqView {
 
-	struct layout {
-		idx::tensor_idx_view const idx;
+	struct Layout {
+		idx::TensorIdxView const idx;
 		Slice<T> const data;
 	} self;
 
-	auto as_view() const -> tensor_seq_view { return *this; }
+	auto as_view() const -> TensorSeqView { return *this; }
 
-	auto operator[](i64 t) const -> tensor_view<T> {
+	auto operator[](i64 t) const -> TensorView<T> {
 		VEG_DEBUG_ASSERT_ALL_OF( //
 				(t >= self.idx.index_begin()),
 				(t < self.idx.index_end()));
@@ -307,26 +308,26 @@ struct tensor_seq_view {
 };
 
 template <typename T>
-struct tensor_seq {
+struct TensorSeq {
 	static_assert(!std::is_const<T>::value, "");
 
-	struct layout {
+	struct Layout {
 		std::vector<T> data;
-		idx::tensor_idx idx;
+		idx::TensorIdx idx;
 	} self;
 
-	explicit tensor_seq(idx::tensor_idx idx)
+	explicit TensorSeq(idx::TensorIdx idx)
 			: self{
 						std::vector<T>(narrow<usize>(idx.required_memory())),
 						VEG_FWD(idx)} {}
 
-	auto as_view() const -> tensor_seq_view<T const> {
+	auto as_view() const -> TensorSeqView<T const> {
 		return {
 				self.idx.as_view(),
 				{as_ref, self.data},
 		};
 	}
-	auto as_view() -> tensor_seq_view<T> {
+	auto as_view() -> TensorSeqView<T> {
 		return {
 				self.idx.as_view(),
 				{as_ref, self.data},
@@ -334,8 +335,8 @@ struct tensor_seq {
 		;
 	}
 
-	auto operator[](i64 t) const -> tensor_view<T const> { return as_view()[t]; }
-	auto operator[](i64 t) -> tensor_view<T> { return as_view()[t]; }
+	auto operator[](i64 t) const -> TensorView<T const> { return as_view()[t]; }
+	auto operator[](i64 t) -> TensorView<T> { return as_view()[t]; }
 };
 } // namespace internal
 } // namespace ddp

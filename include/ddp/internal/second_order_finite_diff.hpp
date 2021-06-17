@@ -7,8 +7,8 @@
 namespace ddp {
 
 template <typename Fn>
-auto second_order_deriv_1_req(Fn const& fn) noexcept -> mem_req {
-	return mem_req::max_of(
+auto second_order_deriv_1_req(Fn const& fn) noexcept -> MemReq {
+	return MemReq::max_of(
 			{as_ref,
 	     {
 					 fn.d_eval_to_req(),
@@ -17,18 +17,18 @@ auto second_order_deriv_1_req(Fn const& fn) noexcept -> mem_req {
 			 }});
 }
 
-template <typename Fn, typename Key, typename T = typename Fn::scalar>
+template <typename Fn, typename Key, typename T = typename Fn::Scalar>
 auto second_order_deriv_1(
 		Fn const& fn,
-		tensor_view<T> out_xx,
-		tensor_view<T> out_ux,
-		tensor_view<T> out_uu,
-		view<T, colmat> out_x,
-		view<T, colmat> out_u,
-		view<T, colvec> out,
+		TensorView<T> out_xx,
+		TensorView<T> out_ux,
+		TensorView<T> out_uu,
+		View<T, colmat> out_x,
+		View<T, colmat> out_u,
+		View<T, colvec> out,
 		i64 t,
-		view<T const, colvec> x,
-		view<T const, colvec> u,
+		View<T const, colvec> x,
+		View<T const, colvec> u,
 		Key k,
 		DynStackView stack) -> Key {
 
@@ -127,12 +127,12 @@ auto second_order_deriv_1(
 }
 
 template <typename Fn>
-auto second_order_deriv_2_req(Fn const& fn) -> mem_req {
-	mem_req init = fn.d_eval_to_req();
+auto second_order_deriv_2_req(Fn const& fn) -> MemReq {
+	MemReq init = fn.d_eval_to_req();
 
-	mem_req max_ = mem_req::sum_of({
+	MemReq max_ = MemReq::sum_of({
 			as_ref,
-			{mem_req::max_of({
+			{MemReq::max_of({
 					 as_ref,
 					 {
 							 fn.state_space().integrate_req(),
@@ -142,7 +142,7 @@ auto second_order_deriv_2_req(Fn const& fn) -> mem_req {
 					 },
 			 }),
 
-	     {tag<typename Fn::scalar>,
+	     {tag<typename Fn::Scalar>,
 	      (fn.output_space().max_dim()     // f1
 	       + fn.output_space().max_ddim()  // df
 	       + fn.state_space().max_dim()    // x1
@@ -152,23 +152,23 @@ auto second_order_deriv_2_req(Fn const& fn) -> mem_req {
 	       )}},
 	});
 
-	return mem_req::max_of({as_ref, {init, max_}});
+	return MemReq::max_of({as_ref, {init, max_}});
 }
 
-template <typename Fn, typename T = typename Fn::scalar>
+template <typename Fn, typename T = typename Fn::Scalar>
 auto second_order_deriv_2(
 		Fn const& fn,
-		tensor_view<T> out_xx,
-		tensor_view<T> out_ux,
-		tensor_view<T> out_uu,
-		view<T, colmat> out_x,
-		view<T, colmat> out_u,
-		view<T, colvec> out,
+		TensorView<T> out_xx,
+		TensorView<T> out_ux,
+		TensorView<T> out_uu,
+		View<T, colmat> out_x,
+		View<T, colmat> out_u,
+		View<T, colvec> out,
 		i64 t,
-		view<T const, colvec> x,
-		view<T const, colvec> u,
-		typename Fn::key k,
-		DynStackView stack) -> typename Fn::key {
+		View<T const, colvec> x,
+		View<T const, colvec> u,
+		typename Fn::Key k,
+		DynStackView stack) -> typename Fn::Key {
 
 	auto no = out_x.rows();
 	auto nx = out_x.cols();

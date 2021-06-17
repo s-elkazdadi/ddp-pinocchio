@@ -14,7 +14,7 @@
 namespace ddp {
 namespace internal {
 template <typename T>
-struct storage_for {
+struct StorageFor {
 	alignas(T) unsigned char buf[sizeof(T)];
 };
 
@@ -75,22 +75,22 @@ void add_second_order_term(
 	auto name(i64 t)&& = delete
 
 template <typename T>
-struct first_order_derivatives {
-	using scalar = T;
+struct FirstOrderDerivatives {
+	using Scalar = T;
 
 	struct layout {
-		eigen::heap_matrix<T, colvec> lfx;
+		eigen::HeapMatrix<T, colvec> lfx;
 
-		internal::mat_seq<T, colvec> lx;
-		internal::mat_seq<T, colvec> lu;
+		internal::MatSeq<T, colvec> lx;
+		internal::MatSeq<T, colvec> lu;
 
-		internal::mat_seq<T, colvec> f;
-		internal::mat_seq<T, colmat> fx;
-		internal::mat_seq<T, colmat> fu;
+		internal::MatSeq<T, colvec> f;
+		internal::MatSeq<T, colmat> fx;
+		internal::MatSeq<T, colmat> fu;
 
-		internal::mat_seq<T, colvec> eq;
-		internal::mat_seq<T, colmat> eqx;
-		internal::mat_seq<T, colmat> equ;
+		internal::MatSeq<T, colvec> eq;
+		internal::MatSeq<T, colmat> eqx;
+		internal::MatSeq<T, colmat> equ;
 	} self;
 
 	auto lfx() const& { return self.lfx.get(); }
@@ -109,27 +109,27 @@ struct first_order_derivatives {
 };
 
 template <typename T>
-struct second_order_derivatives : first_order_derivatives<T> {
-	using scalar = T;
+struct SecondOrderDerivatives : FirstOrderDerivatives<T> {
+	using Scalar = T;
 
 	struct layout {
-		eigen::heap_matrix<T, colmat> lfxx;
+		eigen::HeapMatrix<T, colmat> lfxx;
 
-		internal::mat_seq<T, colmat> lxx;
-		internal::mat_seq<T, colmat> lux;
-		internal::mat_seq<T, colmat> luu;
+		internal::MatSeq<T, colmat> lxx;
+		internal::MatSeq<T, colmat> lux;
+		internal::MatSeq<T, colmat> luu;
 
-		internal::tensor_seq<T> fxx;
-		internal::tensor_seq<T> fux;
-		internal::tensor_seq<T> fuu;
+		internal::TensorSeq<T> fxx;
+		internal::TensorSeq<T> fux;
+		internal::TensorSeq<T> fuu;
 
-		internal::tensor_seq<T> eqxx;
-		internal::tensor_seq<T> equx;
-		internal::tensor_seq<T> equu;
+		internal::TensorSeq<T> eqxx;
+		internal::TensorSeq<T> equx;
+		internal::TensorSeq<T> equu;
 	} self;
 
-	second_order_derivatives(first_order_derivatives<T> base, layout self_)
-			: first_order_derivatives<T>(VEG_FWD(base)), self(VEG_FWD(self_)) {}
+	SecondOrderDerivatives(FirstOrderDerivatives<T> base, layout self_)
+			: FirstOrderDerivatives<T>(VEG_FWD(base)), self(VEG_FWD(self_)) {}
 
 	auto lfxx() const& { return self.lfxx.get(); }
 	auto lfxx() & { return self.lfxx.mut(); }
@@ -152,8 +152,8 @@ struct second_order_derivatives : first_order_derivatives<T> {
 template <typename Cost, typename Dynamics, typename Constraint>
 auto compute_first_derivatives_req(
 		Cost const& cost, Dynamics const& dynamics, Constraint const& constraint)
-		-> mem_req {
-	return mem_req::max_of({
+		-> MemReq {
+	return MemReq::max_of({
 			cost.d_eval_to_req(),
 			dynamics.d_eval_to_req(),
 			constraint.d_eval_to_req(),
@@ -168,7 +168,7 @@ template <
 		typename Constraint,
 		typename Traj>
 void compute_first_derivatives(
-		first_order_derivatives<T>& derivs,
+		FirstOrderDerivatives<T>& derivs,
 		Cost const& cost,
 		Dynamics const& dynamics,
 		Constraint const& constraint,
@@ -216,8 +216,8 @@ inline auto n_threads() -> i64 {
 template <typename Cost, typename Dynamics, typename Constraint>
 auto compute_second_derivatives_req(
 		Cost const& cost, Dynamics const& dynamics, Constraint const& constraint)
-		-> mem_req {
-	mem_req single_thread = mem_req::max_of({
+		-> MemReq {
+	MemReq single_thread = MemReq::max_of({
 			as_ref,
 			{
 					cost.d_eval_to_req(),
@@ -235,12 +235,12 @@ auto compute_second_derivatives_req(
 template <typename Cost, typename Dynamics, typename Constraint>
 auto compute_second_derivatives_test_req(
 		Cost const& cost, Dynamics const& dynamics, Constraint const& constraint)
-		-> mem_req {
-	mem_req single_thread = mem_req::sum_of({
+		-> MemReq {
+	MemReq single_thread = MemReq::sum_of({
 			as_ref,
 			{
 					{
-							tag<typename Dynamics::scalar>,
+							tag<typename Dynamics::Scalar>,
 							(2 * dynamics.output_space().max_ddim()     // storage_f
 	             + 2 * constraint.output_space().max_ddim() // storage_eq
 	             + 6 * dynamics.output_space().max_ddim()   // storage_df
@@ -262,7 +262,7 @@ auto compute_second_derivatives_test_req(
 	             ),
 					},
 
-					mem_req::max_of({
+					MemReq::max_of({
 							as_ref,
 							{
 									dynamics.state_space().integrate_req(),     //
@@ -283,11 +283,11 @@ auto compute_second_derivatives_test_req(
 // multi threaded
 template <typename T, typename Cost, typename Dynamics, typename Constraint>
 auto compute_second_derivatives(
-		second_order_derivatives<T>& derivs,
+		SecondOrderDerivatives<T>& derivs,
 		Cost const& cost,
 		Dynamics const& dynamics,
 		Constraint const& constraint,
-		trajectory<T> const& traj,
+		Trajectory<T> const& traj,
 		DynStackView stack,
 		bool multithread) -> i64 {
 	i64 nanosec{};
@@ -296,7 +296,7 @@ auto compute_second_derivatives(
 				time::raii_timer([&](i64 duration) noexcept { nanosec = duration; });
 		unused(_);
 
-		auto const& _lx = derivs.first_order_derivatives<T>::self.lx;
+		auto const& _lx = derivs.FirstOrderDerivatives<T>::self.lx;
 		i64 const begin = _lx.index_begin();
 		i64 const end = _lx.index_end();
 
@@ -311,13 +311,13 @@ auto compute_second_derivatives(
 		} else {
 			auto const n_threads = internal::n_threads();
 
-			Option<DynStackArray<storage_for<T>>> stack_buffers[max_threads];
+			Option<DynStackArray<StorageFor<T>>> stack_buffers[max_threads];
 
 			{
 				i64 stack_len = stack.remaining_bytes() / n_threads / i64(sizeof(T));
 
 				for (i64 i = 0; i < n_threads; ++i) {
-					stack_buffers[i] = stack.make_new(tag<storage_for<T>>, stack_len);
+					stack_buffers[i] = stack.make_new(tag<StorageFor<T>>, stack_len);
 				}
 			}
 
@@ -366,14 +366,14 @@ auto compute_second_derivatives(
 
 template <typename T, typename Cost, typename Dynamics, typename Constraint>
 auto compute_second_derivatives_one_iter(
-		second_order_derivatives<T>& derivs,
+		SecondOrderDerivatives<T>& derivs,
 		Cost const& cost,
 		Dynamics const& dynamics,
 		Constraint const& constraint,
-		trajectory<T> const& traj,
+		Trajectory<T> const& traj,
 		i64 t,
-		typename Dynamics::key k,
-		DynStackView stack) -> typename Dynamics::key {
+		typename Dynamics::Key k,
+		DynStackView stack) -> typename Dynamics::Key {
 
 	VEG_BIND(auto, (x, u), traj[t]);
 

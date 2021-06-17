@@ -9,10 +9,10 @@ namespace ddp {
 template <typename U>
 auto check_eval_to(
 		U const& self,
-		view<typename U::scalar, colvec> out,
+		View<typename U::Scalar, colvec> out,
 		i64 t,
-		view<typename U::scalar const, colvec> x,
-		view<typename U::scalar const, colvec> u) noexcept {
+		View<typename U::Scalar const, colvec> x,
+		View<typename U::Scalar const, colvec> u) noexcept {
 	unused(self, out, t, x, u);
 
 	VEG_DEBUG_ASSERT_ALL_OF( //
@@ -23,12 +23,12 @@ auto check_eval_to(
 template <typename U>
 auto check_d_eval_to(
 		U const& self,
-		view<typename U::scalar, colmat> out_x,
-		view<typename U::scalar, colmat> out_u,
-		view<typename U::scalar, colvec> out,
+		View<typename U::Scalar, colmat> out_x,
+		View<typename U::Scalar, colmat> out_u,
+		View<typename U::Scalar, colvec> out,
 		i64 t,
-		view<typename U::scalar const, colvec> x,
-		view<typename U::scalar const, colvec> u) noexcept {
+		View<typename U::Scalar const, colvec> x,
+		View<typename U::Scalar const, colvec> u) noexcept {
 	unused(self, out_x, out_u, out, t, x, u);
 
 	VEG_DEBUG_ASSERT_ALL_OF( //
@@ -41,50 +41,49 @@ auto check_d_eval_to(
 			(out.rows() == self.output_space().ddim(t)));
 }
 
+namespace constraint {
 template <typename Dynamics>
-struct no_constraint {
-	struct ref_type {
-		using key = typename Dynamics::key;
-		using scalar = typename Dynamics::scalar;
+struct Null {
+	struct Ref {
+		using Key = typename Dynamics::Key;
+		using Scalar = typename Dynamics::Scalar;
 
-		typename Dynamics::ref_type dynamics_ref;
+		typename Dynamics::Ref dynamics_ref;
 
-		auto dynamics() const -> typename Dynamics::ref_type {
-			return dynamics_ref;
-		}
+		auto dynamics() const -> typename Dynamics::Ref { return dynamics_ref; }
 
-		auto output_space() const noexcept -> vector_space<scalar> {
-			return vector_space<scalar>{0};
+		auto output_space() const noexcept -> VectorSpace<Scalar> {
+			return VectorSpace<Scalar>{0};
 		}
 		auto state_space() const VEG_DEDUCE_RET(dynamics().state_space());
 		auto control_space() const VEG_DEDUCE_RET(dynamics().control_space());
 
-		auto eval_to_req() const -> mem_req { return mem_req{tag<scalar>, 0}; }
+		auto eval_to_req() const -> MemReq { return MemReq{tag<Scalar>, 0}; }
 
 		auto eval_to(
-				view<scalar, colvec> out,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 			unused(k, stack);
 			ddp::check_eval_to(*this, out, t, x, u);
 
 			return k;
 		}
 
-		auto d_eval_to_req() const -> mem_req { return eval_to_req(); }
+		auto d_eval_to_req() const -> MemReq { return eval_to_req(); }
 
 		auto d_eval_to(
-				view<scalar, colmat> out_x,
-				view<scalar, colmat> out_u,
-				view<scalar, colvec> out,
+				View<Scalar, colmat> out_x,
+				View<Scalar, colmat> out_u,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 
 			unused(k, stack);
 			ddp::check_d_eval_to(*this, out_x, out_u, out, t, x, u);
@@ -93,27 +92,25 @@ struct no_constraint {
 		}
 	};
 
-	auto ref(Dynamics const& dynamics) const noexcept -> ref_type {
+	auto ref(Dynamics const& dynamics) const noexcept -> Ref {
 		return {dynamics};
 	}
 };
 
 template <typename Dynamics, typename Fn>
-struct config_constraint {
+struct Config {
 	Fn target_generator;
 	i64 max_dim;
-	mem_req generator_mem_req;
+	MemReq generator_mem_req;
 
-	struct ref_type {
-		using key = typename Dynamics::key;
-		using scalar = typename Dynamics::scalar;
+	struct Ref {
+		using Key = typename Dynamics::Key;
+		using Scalar = typename Dynamics::Scalar;
 
-		typename Dynamics::ref_type dynamics_ref;
-		config_constraint const& constraint_ref;
+		typename Dynamics::Ref dynamics_ref;
+		Config const& constraint_ref;
 
-		auto dynamics() const -> typename Dynamics::ref_type {
-			return dynamics_ref;
-		}
+		auto dynamics() const -> typename Dynamics::Ref { return dynamics_ref; }
 
 		struct dim_fn {
 			Fn const& gen;
@@ -128,24 +125,24 @@ struct config_constraint {
 			}
 		};
 
-		auto output_space() const noexcept -> basic_vector_space<scalar, dim_fn> {
+		auto output_space() const noexcept -> BasicVectorSpace<Scalar, dim_fn> {
 			return {{{constraint_ref.target_generator}, constraint_ref.max_dim}};
 		}
 
 		auto state_space() const VEG_DEDUCE_RET(dynamics().state_space());
 		auto control_space() const VEG_DEDUCE_RET(dynamics().control_space());
 
-		auto eval_to_req() const -> mem_req {
+		auto eval_to_req() const -> MemReq {
 			return constraint_ref.generator_mem_req;
 		}
 
 		auto eval_to(
-				view<scalar, colvec> out,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 			unused(u);
 			ddp::check_eval_to(*this, out, t, x, u);
 
@@ -161,17 +158,17 @@ struct config_constraint {
 			return k;
 		}
 
-		auto d_eval_to_req() const -> mem_req { return eval_to_req(); }
+		auto d_eval_to_req() const -> MemReq { return eval_to_req(); }
 
 		auto d_eval_to(
-				view<scalar, colmat> out_x,
-				view<scalar, colmat> out_u,
-				view<scalar, colvec> out,
+				View<Scalar, colmat> out_x,
+				View<Scalar, colmat> out_u,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 
 			ddp::check_d_eval_to(*this, out_x, out_u, out, t, x, u);
 
@@ -201,25 +198,25 @@ struct config_constraint {
 		}
 	};
 
-	auto ref(Dynamics const& dynamics) const noexcept -> ref_type {
+	auto ref(Dynamics const& dynamics) const noexcept -> Ref {
 		return {dynamics, *this};
 	}
 };
 
 template <typename Dynamics, typename Fn>
-struct velocity_constraint {
+struct Velocity {
 	Fn target_generator;
 	i64 max_dim;
-	mem_req generator_mem_req;
+	MemReq generator_mem_req;
 
-	struct ref_type {
-		using key = typename Dynamics::key;
-		using scalar = typename Dynamics::scalar;
+	struct Ref {
+		using Key = typename Dynamics::Key;
+		using Scalar = typename Dynamics::Scalar;
 
-		typename Dynamics::ref_type dynamics_ref;
-		velocity_constraint const& constraint_ref;
+		typename Dynamics::Ref dynamics_ref;
+		Velocity const& constraint_ref;
 
-		auto dynamics() const -> typename Dynamics::ref_type { return dynamics; }
+		auto dynamics() const -> typename Dynamics::Ref { return dynamics; }
 
 		struct dim_fn {
 			Fn const& gen;
@@ -234,24 +231,24 @@ struct velocity_constraint {
 			}
 		};
 
-		auto output_space() const noexcept -> basic_vector_space<scalar, dim_fn> {
+		auto output_space() const noexcept -> BasicVectorSpace<Scalar, dim_fn> {
 			return {{constraint_ref.target_generator, constraint_ref.max_dim}};
 		}
 
 		auto state_space() const VEG_DEDUCE_RET(dynamics().state_space());
 		auto control_space() const VEG_DEDUCE_RET(dynamics().control_space());
 
-		auto eval_to_req() const -> mem_req {
+		auto eval_to_req() const -> MemReq {
 			return constraint_ref.generator_mem_req;
 		}
 
 		auto eval_to(
-				view<scalar, colvec> out,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 			ddp::check_eval_to(*this, out, t, x, u);
 
 			auto _target = constraint_ref.target_generator(t, stack);
@@ -271,17 +268,17 @@ struct velocity_constraint {
 			return k;
 		}
 
-		auto d_eval_to_req() const -> mem_req { return eval_to_req(); }
+		auto d_eval_to_req() const -> MemReq { return eval_to_req(); }
 
 		auto d_eval_to(
-				view<scalar, colmat> out_x,
-				view<scalar, colmat> out_u,
-				view<scalar, colvec> out,
+				View<Scalar, colmat> out_x,
+				View<Scalar, colmat> out_u,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 			ddp::check_d_eval_to(*this, out_x, out_u, out, t, x, u);
 
 			auto _target = constraint_ref.target_generator(t, stack);
@@ -311,25 +308,23 @@ struct velocity_constraint {
 };
 
 template <typename Dynamics, typename Fn>
-struct spatial_constraint {
+struct Spatial {
 	Fn target_generator;
 	i64 max_dim;
-	mem_req generator_mem_req;
+	MemReq generator_mem_req;
 	std::vector<i64> frame_ids;
 
-	struct ref_type {
-		using scalar = typename Dynamics::scalar;
-		using key = typename Dynamics::key;
+	struct Ref {
+		using Scalar = typename Dynamics::Scalar;
+		using Key = typename Dynamics::Key;
 
-		typename Dynamics::ref_type dynamics_ref;
+		typename Dynamics::Ref dynamics_ref;
 		Fn const& target_generator;
 		i64 max_dim;
-		mem_req generator_mem_req;
+		MemReq generator_mem_req;
 		Slice<i64 const> frame_ids;
 
-		auto dynamics() const -> typename Dynamics::ref_type {
-			return dynamics_ref;
-		}
+		auto dynamics() const -> typename Dynamics::Ref { return dynamics_ref; }
 
 		struct dim_fn {
 			Fn const& gen;
@@ -349,22 +344,22 @@ struct spatial_constraint {
 			}
 		};
 
-		auto output_space() const noexcept -> basic_vector_space<scalar, dim_fn> {
+		auto output_space() const noexcept -> BasicVectorSpace<Scalar, dim_fn> {
 			return {{{target_generator, frame_ids}, max_dim}};
 		}
 		auto state_space() const VEG_DEDUCE_RET(dynamics().state_space());
 		auto control_space() const VEG_DEDUCE_RET(dynamics().control_space());
 
-		auto eval_to_req() const -> mem_req { return generator_mem_req; }
-		auto d_eval_to_req() const -> mem_req { return eval_to_req(); }
+		auto eval_to_req() const -> MemReq { return generator_mem_req; }
+		auto d_eval_to_req() const -> MemReq { return eval_to_req(); }
 
 		auto eval_to(
-				view<scalar, colvec> out,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 			ddp::check_eval_to(*this, out, t, x, u);
 
 			auto nq = dynamics().model.config_dim();
@@ -397,14 +392,14 @@ struct spatial_constraint {
 		}
 
 		auto d_eval_to(
-				view<scalar, colmat> out_x,
-				view<scalar, colmat> out_u,
-				view<scalar, colvec> out,
+				View<Scalar, colmat> out_x,
+				View<Scalar, colmat> out_u,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 
 			ddp::check_d_eval_to(*this, out_x, out_u, out, t, x, u);
 
@@ -450,30 +445,30 @@ struct spatial_constraint {
 		}
 	};
 
-	auto ref(Dynamics const& dynamics) const noexcept -> ref_type {
+	auto ref(Dynamics const& dynamics) const noexcept -> Ref {
 		return {dynamics, target_generator, max_dim, generator_mem_req, frame_ids};
 	}
 };
 
 template <typename Constraint>
-struct constraint_advance_time {
+struct AdvanceTime {
 	Constraint constr;
 
-	struct ref_type {
-		using key = typename Constraint::ref_type::key;
-		using scalar = typename Constraint::ref_type::scalar;
+	struct Ref {
+		using Key = typename Constraint::Ref::Key;
+		using Scalar = typename Constraint::Ref::Scalar;
 
-		typename Constraint::ref_type constr;
+		typename Constraint::Ref constr;
 
 		auto dynamics() const VEG_DEDUCE_RET(constr.dynamics());
 
 		struct dim_fn {
-			typename Constraint::ref_type constr;
+			typename Constraint::Ref constr;
 			auto operator()(i64 t) const noexcept -> i64 {
 				return constr.output_space().dim(t + 1);
 			}
 		};
-		auto output_space() const noexcept -> basic_vector_space<scalar, dim_fn> {
+		auto output_space() const noexcept -> BasicVectorSpace<Scalar, dim_fn> {
 			return {{{constr}, constr.output_space().max_dim()}};
 		}
 		auto state_space() const VEG_DEDUCE_RET(constr.state_space());
@@ -482,23 +477,29 @@ struct constraint_advance_time {
 		auto dim(i64 t) const -> i64 { return constr.dim(t + 1); }
 		auto max_dim() const -> i64 { return constr.max_dim(); }
 
-		auto eval_to_req() const -> mem_req {
-			return mem_req::sum_of({
-					mem_req::max_of({
-							constr.eval_to_req(),
-							dynamics().eval_to_req(),
-					}),
+		auto eval_to_req() const -> MemReq {
+			return MemReq::sum_of({
+					as_ref,
+					{
+							MemReq::max_of({
+									as_ref,
+									{
+											constr.eval_to_req(),
+											dynamics().eval_to_req(),
+									},
+							}),
 
-					{tag<scalar>, dynamics().state_space().max_dim()},
+							{tag<Scalar>, dynamics().state_space().max_dim()},
+					},
 			});
 		}
 		auto eval_to(
-				view<scalar, colvec> out,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 			ddp::check_eval_to(*this, out, t, x, u);
 
 			auto nde = output_space().ddim(t);
@@ -509,46 +510,53 @@ struct constraint_advance_time {
 			}
 
 			DDP_TMP_VECTOR_UNINIT(
-					stack, x_n, scalar, dynamics().output_space().dim(t));
+					stack, x_n, Scalar, dynamics().output_space().dim(t));
 			k = dynamics().eval_to(x_n, t, x, u, VEG_FWD(k), stack);
 			k = constr.eval_to(
 					out, t + 1, eigen::as_const(x_n), u, VEG_FWD(k), stack);
 			return k;
 		}
 
-		auto d_eval_to_req() const -> mem_req {
+		auto d_eval_to_req() const -> MemReq {
 			auto nx = dynamics().state_space().max_dim();
 			auto ndx = dynamics().state_space().max_ddim();
 			auto ndu = dynamics().control_space().max_ddim();
 			auto nde = output_space().max_ddim();
 
-			return mem_req::sum_of({
+			return MemReq::sum_of({
+					as_ref,
+					{
+							MemReq::max_of({
+									as_ref,
+									{
+											constr.d_eval_to_req(),
+											dynamics().d_eval_to_req(),
+									},
+							}),
 
-					mem_req::max_of({
-							constr.d_eval_to_req(),
-							dynamics().d_eval_to_req(),
-					}),
-
-					{tag<scalar>,
-			     (nx          //
-			      + ndx       //
-			      + ndx * ndx //
-			      + ndx * ndu //
-			      + nde * ndx //
-			      + nde * ndu //
-			      )},
+							{
+									tag<Scalar>,
+									(nx          //
+			             + ndx       //
+			             + ndx * ndx //
+			             + ndx * ndu //
+			             + nde * ndx //
+			             + nde * ndu //
+			             ),
+							},
+					},
 			});
 		}
 
 		auto d_eval_to(
-				view<scalar, colmat> out_x,
-				view<scalar, colmat> out_u,
-				view<scalar, colvec> out,
+				View<Scalar, colmat> out_x,
+				View<Scalar, colmat> out_u,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 
 			auto nx = dynamics().output_space().dim(t);
 			auto ndx = dynamics().output_space().ddim(t);
@@ -566,14 +574,14 @@ struct constraint_advance_time {
 				return k;
 			}
 
-			DDP_TMP_VECTOR_UNINIT(stack, x_n, scalar, nx);
-			DDP_TMP_MATRIX_UNINIT(stack, fx_n, scalar, ndx, ndx);
-			DDP_TMP_MATRIX_UNINIT(stack, fu_n, scalar, ndx, ndu1);
+			DDP_TMP_VECTOR_UNINIT(stack, x_n, Scalar, nx);
+			DDP_TMP_MATRIX_UNINIT(stack, fx_n, Scalar, ndx, ndx);
+			DDP_TMP_MATRIX_UNINIT(stack, fu_n, Scalar, ndx, ndu1);
 
 			k = dynamics().d_eval_to(fx_n, fu_n, x_n, t, x, u, VEG_FWD(k), stack);
 
-			DDP_TMP_MATRIX_UNINIT(stack, eq_n_x, scalar, nde, ndx);
-			DDP_TMP_MATRIX_UNINIT(stack, eq_n_u, scalar, nde, ndu2);
+			DDP_TMP_MATRIX_UNINIT(stack, eq_n_x, Scalar, nde, ndx);
+			DDP_TMP_MATRIX_UNINIT(stack, eq_n_u, Scalar, nde, ndu2);
 
 			k = constr.d_eval_to(
 					eq_n_x,
@@ -601,22 +609,22 @@ struct constraint_advance_time {
 	};
 
 	template <typename Dynamics>
-	auto ref(Dynamics const& dynamics) const noexcept -> ref_type {
+	auto ref(Dynamics const& dynamics) const noexcept -> Ref {
 		return {constr.ref(dynamics)};
 	}
 };
 
 template <typename Constr1, typename Constr2>
-struct concat_constraint {
+struct Concat {
 	Constr1 constr1;
 	Constr2 constr2;
 
-	struct ref_type {
-		using key = typename Constr1::ref_type::key;
-		using scalar = typename Constr1::ref_type::scalar;
+	struct Ref {
+		using Key = typename Constr1::Ref::Key;
+		using Scalar = typename Constr1::Ref::Scalar;
 
-		typename Constr1::ref_type constr1;
-		typename Constr2::ref_type constr2;
+		typename Constr1::Ref constr1;
+		typename Constr2::Ref constr2;
 
 		auto dynamics() const -> decltype(auto) { return constr1.dynamics(); }
 
@@ -624,19 +632,19 @@ struct concat_constraint {
 		auto control_space() const { return constr1.control_space(); }
 		auto output_space() const { return constr1.output_space(); }
 
-		auto eval_to_req() const -> mem_req {
-			return mem_req::max_of({
+		auto eval_to_req() const -> MemReq {
+			return MemReq::max_of({
 					constr1.eval_to_req(),
 					constr2.eval_to_req(),
 			});
 		}
 		auto eval_to(
-				view<scalar, colvec> out,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 
 			VEG_BIND(
 					auto,
@@ -649,22 +657,22 @@ struct concat_constraint {
 			return k;
 		}
 
-		auto d_eval_to_req() const -> mem_req {
-			return mem_req::max_of({
+		auto d_eval_to_req() const -> MemReq {
+			return MemReq::max_of({
 					constr1.d_eval_to_req(),
 					constr2.d_eval_to_req(),
 			});
 		}
 
 		auto d_eval_to(
-				view<scalar, colmat> out_x,
-				view<scalar, colmat> out_u,
-				view<scalar, colvec> out,
+				View<Scalar, colmat> out_x,
+				View<Scalar, colmat> out_u,
+				View<Scalar, colvec> out,
 				i64 t,
-				view<scalar const, colvec> x,
-				view<scalar const, colvec> u,
-				key k,
-				DynStackView stack) const -> key {
+				View<Scalar const, colvec> x,
+				View<Scalar const, colvec> u,
+				Key k,
+				DynStackView stack) const -> Key {
 
 			VEG_BIND(
 					auto,
@@ -687,20 +695,26 @@ struct concat_constraint {
 	};
 
 	template <typename Dynamics>
-	auto ref(Dynamics const& dynamics) const noexcept -> ref_type {
+	auto ref(Dynamics const& dynamics) const noexcept -> Ref {
 		return {constr1.ref(dynamics), constr2.ref(dynamics)};
 	}
 };
 
-namespace make {
-namespace fn {
-struct config_constraint {
+namespace nb {
+struct null {
+	template <typename Dynamics>
+	auto operator()(Dynamics const& /*dynamics*/
+	) const -> Null<Dynamics> {
+		return {};
+	}
+};
+struct config {
 	template <typename Dynamics, typename Fn>
 	auto operator()(
 			Dynamics const& /*dynamics*/,
 			Fn target_gen,
 			i64 max_dim,
-			mem_req gen_mem_req) const -> ddp::config_constraint<Dynamics, Fn> {
+			MemReq gen_mem_req) const -> Config<Dynamics, Fn> {
 		return {
 				VEG_FWD(target_gen),
 				max_dim,
@@ -709,32 +723,27 @@ struct config_constraint {
 	}
 };
 template <i64 N>
-struct constraint_advance_time {
+struct advance_time {
 	static_assert(N > 0, "");
 	template <typename Constraint>
 	auto operator()(Constraint&& constr) const //
-			-> ddp::constraint_advance_time<
-					decltype(constraint_advance_time<N - 1>{}(VEG_FWD(constr)))> {
-		return {constraint_advance_time<N - 1>{}(VEG_FWD(constr))};
+			-> AdvanceTime<decltype(advance_time<N - 1>{}(VEG_FWD(constr)))> {
+		return {advance_time<N - 1>{}(VEG_FWD(constr))};
 	}
 };
 
 template <>
-struct constraint_advance_time<0> {
+struct advance_time<0> {
 	template <typename Constraint>
 	auto operator()(Constraint&& constr) const -> Constraint {
 		return VEG_FWD(constr);
 	}
 };
-} // namespace fn
-VEG_INLINE_VAR(config_constraint, fn::config_constraint);
-namespace {
-template <i64 N>
-constexpr auto const& constraint_advance_time =
-		meta::static_const<fn::constraint_advance_time<N>>::value;
-} // namespace
-} // namespace make
-
+} // namespace nb
+VEG_NIEBLOID(null);
+VEG_NIEBLOID(config);
+VEG_NIEBLOID_TEMPLATE(i64 N, advance_time, N);
+} // namespace constraint
 } // namespace ddp
 
 #include "veg/internal/epilogue.hpp"

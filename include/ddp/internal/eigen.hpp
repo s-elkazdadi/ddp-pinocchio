@@ -144,23 +144,23 @@ using member_data_t = meta::detected_t<ddp::internal::data_expr, T>;
 template <typename T>
 using member_size_t = meta::detected_t<ddp::internal::size_expr, T>;
 
-enum struct kind { colvec, colmat, rowvec, rowmat };
+enum struct Kind { colvec, colmat, rowvec, rowmat };
 
-template <typename T, kind K>
-struct heap_matrix;
+template <typename T, Kind K>
+struct HeapMatrix;
 
 namespace internal {
 
 template <typename T>
-using fmt_formatter = meta::conditional_t<
+using FmtFormatter = meta::conditional_t<
 		::fmt::has_formatter<T, ::fmt::format_context>::value,
 		::fmt::formatter<T>,
 		::fmt::detail::fallback_formatter<T>>;
 
 template <typename T>
-struct with_formatter {
+struct WithFormatter {
 	T const& val;
-	fmt_formatter<T>& fmt;
+	FmtFormatter<T>& fmt;
 };
 
 template <typename T, typename OutIt>
@@ -169,7 +169,7 @@ auto format_impl(
 		i64 rows,
 		i64 cols,
 		fn::FnView<T(i64, i64)> getter,
-		fmt_formatter<T>& fmt) -> decltype(fc.out()) {
+		FmtFormatter<T>& fmt) -> decltype(fc.out()) {
 	auto out = fc.out();
 
 	bool const colmat = cols == 1;
@@ -219,7 +219,7 @@ auto format_impl(
 			T v = getter(i, j);
 
 			auto len =
-					narrow<i64>(::fmt::formatted_size("{}", with_formatter<T>{v, fmt}));
+					narrow<i64>(::fmt::formatted_size("{}", WithFormatter<T>{v, fmt}));
 			line_len += len;
 
 			if (line_len >= win_cols - 10) {
@@ -227,7 +227,7 @@ auto format_impl(
 				*out++ = ' ';
 				line_len = len + 1;
 			}
-			out = ::fmt::format_to(out, "{}", with_formatter<T>{v, fmt});
+			out = ::fmt::format_to(out, "{}", WithFormatter<T>{v, fmt});
 
 			col_sep = ", ";
 		}
@@ -247,7 +247,7 @@ extern template auto ddp::eigen::internal::format_impl(
 		i64 rows,
 		i64 cols,
 		fn::FnView<float(i64, i64)> getter,
-		fmt_formatter<float>& fmt) -> decltype(fc.out());
+		FmtFormatter<float>& fmt) -> decltype(fc.out());
 
 extern template auto ddp::eigen::internal::format_impl(
 		::fmt::basic_format_context<::fmt::v7::detail::buffer_appender<char>, char>&
@@ -255,7 +255,7 @@ extern template auto ddp::eigen::internal::format_impl(
 		i64 rows,
 		i64 cols,
 		fn::FnView<double(i64, i64)> getter,
-		fmt_formatter<double>& fmt) -> decltype(fc.out());
+		FmtFormatter<double>& fmt) -> decltype(fc.out());
 
 extern template auto ddp::eigen::internal::format_impl(
 		::fmt::basic_format_context<::fmt::v7::detail::buffer_appender<char>, char>&
@@ -263,30 +263,30 @@ extern template auto ddp::eigen::internal::format_impl(
 		i64 rows,
 		i64 cols,
 		fn::FnView<long double(i64, i64)> getter,
-		fmt_formatter<long double>& fmt) -> decltype(fc.out());
+		FmtFormatter<long double>& fmt) -> decltype(fc.out());
 
 template <typename T>
 constexpr auto fail(T* p = nullptr) -> T {
 	return *p;
 }
 
-template <typename T, kind K>
+template <typename T, Kind K>
 struct to_matrix;
 
 template <typename T>
-struct to_matrix<T, kind::colmat> {
+struct to_matrix<T, Kind::colmat> {
 	using type = Eigen::Matrix<T, -1, -1, Eigen::ColMajor>;
 };
 template <typename T>
-struct to_matrix<T, kind::colvec> {
+struct to_matrix<T, Kind::colvec> {
 	using type = Eigen::Matrix<T, -1, 1, Eigen::ColMajor>;
 };
 template <typename T>
-struct to_matrix<T, kind::rowmat> {
+struct to_matrix<T, Kind::rowmat> {
 	using type = Eigen::Matrix<T, -1, -1, Eigen::RowMajor>;
 };
 template <typename T>
-struct to_matrix<T, kind::rowvec> {
+struct to_matrix<T, Kind::rowvec> {
 	using type = Eigen::Matrix<T, 1, -1, Eigen::RowMajor>;
 };
 
@@ -296,36 +296,36 @@ using add_const_if = meta::conditional_t<B, T const, T>;
 template <typename T>
 struct kind_of
 		: std::integral_constant<
-					kind,
+					Kind,
 					!T::IsRowMajor
-							? (T::ColsAtCompileTime == 1 ? kind::colvec : kind::colmat)
-							: (T::RowsAtCompileTime == 1 ? kind::rowvec : kind::rowmat)> {};
+							? (T::ColsAtCompileTime == 1 ? Kind::colvec : Kind::colmat)
+							: (T::RowsAtCompileTime == 1 ? Kind::rowvec : Kind::rowmat)> {};
 
 } // namespace internal
 
-template <typename T, kind K>
-using matrix = typename internal::to_matrix<T, K>::type;
+template <typename T, Kind K>
+using Matrix = typename internal::to_matrix<T, K>::type;
 
-template <typename T, kind K>
-using view = Eigen::Map<
+template <typename T, Kind K>
+using View = Eigen::Map<
 		internal::add_const_if<
 				std::is_const<T>::value,
 				typename internal::to_matrix<meta::uncvref_t<T>, K>::type>,
 		Eigen::Unaligned,
 		Eigen::OuterStride<-1>>;
 
-static_assert(internal::kind_of<Eigen::VectorXd>::value == kind::colvec, "");
-static_assert(internal::kind_of<Eigen::MatrixXd>::value == kind::colmat, "");
+static_assert(internal::kind_of<Eigen::VectorXd>::value == Kind::colvec, "");
+static_assert(internal::kind_of<Eigen::MatrixXd>::value == Kind::colmat, "");
 
 namespace internal {
-template <template <typename, kind> class Tpl, kind K>
+template <template <typename, Kind> class Tpl, Kind K>
 struct dyn_cast_impl;
 
-template <kind K>
-struct dyn_cast_impl<matrix, K> {
+template <Kind K>
+struct dyn_cast_impl<Matrix, K> {
 	template <typename T>
-	static auto apply(T& mat) -> matrix<typename T::Scalar, K> {
-		if (K == kind::colvec) {
+	static auto apply(T& mat) -> Matrix<typename T::Scalar, K> {
+		if (K == Kind::colvec) {
 			VEG_DEBUG_ASSERT(mat.cols() == 1);
 		}
 		return mat;
@@ -333,10 +333,10 @@ struct dyn_cast_impl<matrix, K> {
 };
 
 template <>
-struct dyn_cast_impl<view, kind::colvec> {
+struct dyn_cast_impl<View, Kind::colvec> {
 	template <typename T>
 	static auto apply(T& mat)
-			-> view<std::remove_pointer_t<decltype(mat.data())>, kind::colvec> {
+			-> View<std::remove_pointer_t<decltype(mat.data())>, Kind::colvec> {
 		static_assert(!T::IsRowMajor, "");
 
 		VEG_DEBUG_ASSERT_ALL_OF((mat.innerStride() == 1), (mat.cols() == 1));
@@ -345,10 +345,10 @@ struct dyn_cast_impl<view, kind::colvec> {
 };
 
 template <>
-struct dyn_cast_impl<view, kind::rowvec> {
+struct dyn_cast_impl<View, Kind::rowvec> {
 	template <typename T>
 	static auto apply(T& mat)
-			-> view<std::remove_pointer_t<decltype(mat.data())>, kind::rowvec> {
+			-> View<std::remove_pointer_t<decltype(mat.data())>, Kind::rowvec> {
 		static_assert(T::IsRowMajor, "");
 
 		VEG_DEBUG_ASSERT_ALL_OF((mat.innerStride() == 1), (mat.rows() == 1));
@@ -357,10 +357,10 @@ struct dyn_cast_impl<view, kind::rowvec> {
 };
 
 template <>
-struct dyn_cast_impl<view, kind::colmat> {
+struct dyn_cast_impl<View, Kind::colmat> {
 	template <typename T>
 	static auto apply(T& mat)
-			-> view<std::remove_pointer_t<decltype(mat.data())>, kind::colmat> {
+			-> View<std::remove_pointer_t<decltype(mat.data())>, Kind::colmat> {
 		static_assert(!T::IsRowMajor, "");
 
 		VEG_DEBUG_ASSERT(mat.innerStride() == 1);
@@ -369,10 +369,10 @@ struct dyn_cast_impl<view, kind::colmat> {
 };
 
 template <>
-struct dyn_cast_impl<view, kind::rowmat> {
+struct dyn_cast_impl<View, Kind::rowmat> {
 	template <typename T>
 	static auto apply(T& mat)
-			-> view<std::remove_pointer_t<decltype(mat.data())>, kind::rowmat> {
+			-> View<std::remove_pointer_t<decltype(mat.data())>, Kind::rowmat> {
 		static_assert(T::IsRowMajor, "");
 
 		VEG_DEBUG_ASSERT(mat.innerStride() == 1);
@@ -470,9 +470,9 @@ constexpr auto any_of(std::initializer_list<bool> lst) -> bool {
 
 } // namespace internal
 
-template <typename T, kind K>
+template <typename T, Kind K>
 using view_type_t =
-		eigen::view<veg::meta::unptr_t<decltype(VEG_DECLVAL(T &&).data())>, K>;
+		eigen::View<veg::meta::unptr_t<decltype(VEG_DECLVAL(T &&).data())>, K>;
 
 template <typename T>
 using deduce_view_t =
@@ -487,7 +487,7 @@ struct as_const {
 			operator(),
 			(mat, T const&))
 	const noexcept->deduce_view_t<T const&> {
-		return internal::dyn_cast_impl<view, internal::kind_of<T>::value>::apply(
+		return internal::dyn_cast_impl<View, internal::kind_of<T>::value>::apply(
 				mat);
 	}
 };
@@ -500,7 +500,7 @@ struct as_mut {
 			(mat, T&&))
 	const noexcept->deduce_view_t<T> {
 		return internal::dyn_cast_impl<
-				view,
+				View,
 				internal::kind_of<meta::uncvref_t<T>>::value>::apply(mat);
 	}
 };
@@ -611,7 +611,7 @@ struct slice_to_vec {
 			(s, T&),
 			(/*nrows*/ = 0, i64),
 			(/*ncols*/ = 0, i64))
-	const noexcept->view<meta::unptr_t<member_data_t<T&>>, kind::colvec> {
+	const noexcept->View<meta::unptr_t<member_data_t<T&>>, Kind::colvec> {
 		auto size = narrow<i64>(s.size());
 		return {s.data(), size, 1, size};
 	}
@@ -628,7 +628,7 @@ struct slice_to_mat {
 			(s, T&),
 			(nrows, i64),
 			(ncols, i64))
-	const noexcept->view<meta::unptr_t<member_data_t<T&>>, kind::colmat> {
+	const noexcept->View<meta::unptr_t<member_data_t<T&>>, Kind::colmat> {
 		VEG_DEBUG_ASSERT(nrows * ncols == s.size());
 		return {s.data(), nrows, ncols, nrows};
 	}
@@ -835,37 +835,42 @@ DDP_NIEBLOID(mul_add_to_noalias);
 DDP_NIEBLOID(dot);
 DDP_NIEBLOID(add_identity);
 
+struct WithDims {
+	explicit WithDims() = default;
+};
+VEG_INLINE_VAR(with_dims, WithDims);
+
 template <typename T>
-struct heap_matrix<T, kind::colmat> {
+struct HeapMatrix<T, Kind::colmat> {
 private:
 	std::vector<T> data;
 	i64 rows;
 	i64 cols;
 
 public:
-	heap_matrix(i64 _rows, i64 _cols)
+	HeapMatrix(WithDims /*tag*/, i64 _rows, i64 _cols)
 			: data(narrow<usize>(_rows * _cols)), rows(_rows), cols(_cols) {}
 
-	auto get() const noexcept -> view<T const, kind::colmat> {
+	auto get() const noexcept -> View<T const, Kind::colmat> {
 		return eigen::slice_to_mat(data, rows, cols);
 	}
-	auto mut() noexcept -> view<T, kind::colmat> {
+	auto mut() noexcept -> View<T, Kind::colmat> {
 		return eigen::slice_to_mat(data, rows, cols);
 	}
 };
 
 template <typename T>
-struct heap_matrix<T, kind::colvec> {
+struct HeapMatrix<T, Kind::colvec> {
 private:
 	std::vector<T> data;
 
 public:
-	heap_matrix(i64 _rows) : data(narrow<usize>(_rows)) {}
+	HeapMatrix(WithDims /*tag*/, i64 _rows) : data(narrow<usize>(_rows)) {}
 
-	auto get() const noexcept -> view<T const, kind::colvec> {
+	auto get() const noexcept -> View<T const, Kind::colvec> {
 		return eigen::slice_to_vec(data);
 	}
-	auto mut() noexcept -> view<T, kind::colvec> {
+	auto mut() noexcept -> View<T, Kind::colvec> {
 		return eigen::slice_to_vec(data);
 	}
 };
@@ -874,27 +879,27 @@ public:
 
 namespace {
 constexpr auto const& colmat =
-		std::integral_constant<eigen::kind, eigen::kind::colmat>::value;
+		std::integral_constant<eigen::Kind, eigen::Kind::colmat>::value;
 constexpr auto const& colvec =
-		std::integral_constant<eigen::kind, eigen::kind::colvec>::value;
+		std::integral_constant<eigen::Kind, eigen::Kind::colvec>::value;
 constexpr auto const& rowmat =
-		std::integral_constant<eigen::kind, eigen::kind::rowmat>::value;
+		std::integral_constant<eigen::Kind, eigen::Kind::rowmat>::value;
 constexpr auto const& rowvec =
-		std::integral_constant<eigen::kind, eigen::kind::rowvec>::value;
+		std::integral_constant<eigen::Kind, eigen::Kind::rowvec>::value;
 } // namespace
-using eigen::matrix;
-using eigen::view;
+using eigen::Matrix;
+using eigen::View;
 
 } // namespace ddp
 
 template <typename T, typename CharT>
-struct fmt::formatter<ddp::eigen::internal::with_formatter<T>, CharT> {
+struct fmt::formatter<ddp::eigen::internal::WithFormatter<T>, CharT> {
 	auto parse(::fmt::basic_format_parse_context<CharT>& pc) {
 		return pc.begin();
 	}
 	template <typename OutIt>
 	auto format(
-			ddp::eigen::internal::with_formatter<T> val,
+			ddp::eigen::internal::WithFormatter<T> val,
 			::fmt::basic_format_context<OutIt, CharT>& fc) {
 		return val.fmt.format(val.val, fc);
 	}
@@ -906,13 +911,13 @@ struct fmt::formatter<
 		char,
 		veg::meta::enable_if_t<
 				std::is_base_of<Eigen::MatrixBase<Matrix>, Matrix>::value>>
-		: ddp::eigen::internal::fmt_formatter<typename Matrix::Scalar> {
-	using scalar = veg::meta::uncvref_t<typename Matrix::Scalar>;
+		: ddp::eigen::internal::FmtFormatter<typename Matrix::Scalar> {
+	using Scalar = veg::meta::uncvref_t<typename Matrix::Scalar>;
 
 	template <typename OutIt>
 	auto format(Matrix const& mat, ::fmt::basic_format_context<OutIt, char>& fc)
 			-> decltype(fc.out()) {
-		return ddp::eigen::internal::format_impl<scalar>(
+		return ddp::eigen::internal::format_impl<Scalar>(
 				fc,
 				mat.rows(),
 				mat.cols(),

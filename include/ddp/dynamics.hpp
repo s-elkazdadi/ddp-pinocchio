@@ -12,18 +12,18 @@ namespace ddp {
 namespace internal {
 namespace meta {
 template <typename T>
-using key_type_t = typename T::key;
+using key_type_t = typename T::Key;
 template <typename T>
 using acquire_workspace_expr =
 		decltype(VEG_DECLVAL(T const&).acquire_workspace());
 template <typename T>
 using neutral_configuration_expr =
 		decltype(VEG_DECLVAL(T const&).neutral_configuration(
-				VEG_DECLVAL(view<scalar_type_t<T>, colvec>)));
+				VEG_DECLVAL(View<scalar_type_t<T>, colvec>)));
 template <typename T>
 using random_configuration_expr =
 		decltype(VEG_DECLVAL(T const&).random_configuration(
-				VEG_DECLVAL(view<scalar_type_t<T>, colvec>)));
+				VEG_DECLVAL(View<scalar_type_t<T>, colvec>)));
 
 template <typename T>
 using state_space_expr = decltype(VEG_DECLVAL(T const&).state_space());
@@ -35,10 +35,10 @@ using output_space_expr = decltype(VEG_DECLVAL(T const&).output_space());
 template <typename T>
 using eval_to_expr = decltype(VEG_DECLVAL(T const&).eval_to(
 
-		VEG_DECLVAL(view<scalar_type_t<T>, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T>, colvec>),
 		VEG_DECLVAL(i64),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
 		VEG_DECLVAL(key_type_t<T>&&),
 		VEG_DECLVAL(DynStackView)
 
@@ -47,12 +47,12 @@ using eval_to_expr = decltype(VEG_DECLVAL(T const&).eval_to(
 template <typename T>
 using deval_to_expr = decltype(VEG_DECLVAL(T const&).eval_to(
 
-		VEG_DECLVAL(view<scalar_type_t<T>, colmat>),
-		VEG_DECLVAL(view<scalar_type_t<T>, colmat>),
-		VEG_DECLVAL(view<scalar_type_t<T>, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T>, colmat>),
+		VEG_DECLVAL(View<scalar_type_t<T>, colmat>),
+		VEG_DECLVAL(View<scalar_type_t<T>, colvec>),
 		VEG_DECLVAL(i64),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
-		VEG_DECLVAL(view<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
+		VEG_DECLVAL(View<scalar_type_t<T> const, colvec>),
 		VEG_DECLVAL(key_type_t<T>&&),
 		VEG_DECLVAL(DynStackView)
 
@@ -65,46 +65,43 @@ using req_deval_to_expr = decltype(VEG_DECLVAL(T const&).d_eval_to_req());
 } // namespace meta
 } // namespace internal
 
-namespace concepts {
-namespace aux {} // namespace aux
-} // namespace concepts
-
+namespace dynamics {
 template <typename T>
-struct lqr_dynamics {
-	eigen::matrix<T, colmat> a;
-	eigen::matrix<T, colmat> b;
-	eigen::matrix<T, colvec> c;
+struct Lqr {
+	eigen::Matrix<T, colmat> a;
+	eigen::Matrix<T, colmat> b;
+	eigen::Matrix<T, colvec> c;
 
-	struct key {
+	struct Key {
 		explicit operator bool() const { return true; }
 	};
-	using scalar = T;
+	using Scalar = T;
 
-	auto acquire_workspace() const -> key { return {}; }
-	void neutral_configuration(view<T, colvec> q) const { q.setZero(); }
-	void random_configuration(view<T, colvec> q) const { q.setRandom(); }
+	auto acquire_workspace() const -> Key { return {}; }
+	void neutral_configuration(View<T, colvec> q) const { q.setZero(); }
+	void random_configuration(View<T, colvec> q) const { q.setRandom(); }
 
-	auto state_space() const -> vector_space<T> {
-		return vector_space<T>{a.cols()};
+	auto state_space() const -> VectorSpace<T> {
+		return VectorSpace<T>{a.cols()};
 	}
-	auto output_space() const -> vector_space<T> {
-		return vector_space<T>{a.rows()};
+	auto output_space() const -> VectorSpace<T> {
+		return VectorSpace<T>{a.rows()};
 	}
-	auto control_space() const -> vector_space<T> {
-		return vector_space<T>{b.cols()};
+	auto control_space() const -> VectorSpace<T> {
+		return VectorSpace<T>{b.cols()};
 	}
 
-	auto eval_to_req() const -> mem_req {
+	auto eval_to_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	auto eval_to(
-			view<T, colvec> f_out,
+			View<T, colvec> f_out,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> u,
-			key k,
-			DynStackView stack) const -> key {
+			View<T const, colvec> x,
+			View<T const, colvec> u,
+			Key k,
+			DynStackView stack) const -> Key {
 
 		unused(t, stack);
 
@@ -124,19 +121,19 @@ struct lqr_dynamics {
 		return k;
 	}
 
-	auto d_eval_to_req() const -> mem_req {
+	auto d_eval_to_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	auto d_eval_to(
-			view<T, colmat> fx,
-			view<T, colmat> fu,
-			view<T, colvec> f,
+			View<T, colmat> fx,
+			View<T, colmat> fu,
+			View<T, colvec> f,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> u,
-			key k,
-			DynStackView stack) const -> key {
+			View<T const, colvec> x,
+			View<T const, colvec> u,
+			Key k,
+			DynStackView stack) const -> Key {
 
 		unused(t, stack);
 
@@ -163,27 +160,27 @@ struct lqr_dynamics {
 
 		return k;
 	}
-	using ref_type = lqr_dynamics const&;
+	using Ref = Lqr const&;
 };
 
 template <typename T>
-struct pinocchio_dynamics_free {
-	pinocchio::model<T> const& model;
+struct PinocchioFree {
+	pinocchio::Model<T> const& model;
 	T dt;
 	bool can_use_first_order_diff;
 
-	using scalar = T;
-	using key = typename pinocchio::model<T>::key;
+	using Scalar = T;
+	using Key = typename pinocchio::Model<T>::Key;
 
-	auto acquire_workspace() const -> key { return model.acquire_workspace(); }
+	auto acquire_workspace() const -> Key { return model.acquire_workspace(); }
 
-	void neutral_configuration(view<T, colvec> x) const {
+	void neutral_configuration(View<T, colvec> x) const {
 		VEG_BIND(auto, (q, v), eigen::split_at_row(x, model.config_dim()));
 
 		model.neutral_configuration(q);
 		v.setZero();
 	}
-	void random_configuration(view<T, colvec> x) const {
+	void random_configuration(View<T, colvec> x) const {
 		VEG_BIND(auto, (q, v), eigen::split_at_row(x, model.config_dim()));
 		model.random_configuration(q);
 		v.setRandom();
@@ -191,21 +188,21 @@ struct pinocchio_dynamics_free {
 
 	auto state_space() const -> pinocchio_state_space<T> { return {model}; }
 	auto output_space() const -> pinocchio_state_space<T> { return {model}; }
-	auto control_space() const -> vector_space<T> {
-		return vector_space<T>{model.tangent_dim()};
+	auto control_space() const -> VectorSpace<T> {
+		return VectorSpace<T>{model.tangent_dim()};
 	}
 
-	auto eval_to_req() const -> mem_req {
+	auto eval_to_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	auto eval_to(
-			view<T, colvec> f_out,
+			View<T, colvec> f_out,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> u,
-			key k,
-			DynStackView stack) const -> key {
+			View<T const, colvec> x,
+			View<T const, colvec> u,
+			Key k,
+			DynStackView stack) const -> Key {
 
 		unused(t, stack);
 
@@ -241,19 +238,19 @@ struct pinocchio_dynamics_free {
 		return k;
 	}
 
-	auto d_eval_to_req() const -> mem_req {
+	auto d_eval_to_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	auto d_eval_to(
-			view<T, colmat> fx,
-			view<T, colmat> fu,
-			view<T, colvec> f,
+			View<T, colmat> fx,
+			View<T, colmat> fu,
+			View<T, colvec> f,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> u,
-			key k,
-			DynStackView stack) const -> key {
+			View<T const, colvec> x,
+			View<T const, colvec> u,
+			Key k,
+			DynStackView stack) const -> Key {
 
 		unused(t, stack);
 
@@ -309,28 +306,28 @@ struct pinocchio_dynamics_free {
 		return k;
 	}
 
-	using ref_type = pinocchio_dynamics_free;
+	using Ref = PinocchioFree;
 };
 
 template <typename T>
-struct pinocchio_contact_dynamics { /* NOLINT */
-	pinocchio::model<T> const& model;
+struct PinocchioContact { /* NOLINT */
+	pinocchio::Model<T> const& model;
 	std::vector<i64> frame_ids;
 	T dt;
 	bool can_use_first_order_diff;
 
-	using scalar = T;
-	using key = typename pinocchio::model<T>::key;
+	using Scalar = T;
+	using Key = typename pinocchio::Model<T>::Key;
 
-	auto acquire_workspace() const -> key { return model.acquire_workspace(); }
+	auto acquire_workspace() const -> Key { return model.acquire_workspace(); }
 
-	void neutral_configuration(view<T, colvec> x) const {
+	void neutral_configuration(View<T, colvec> x) const {
 		VEG_BIND(auto, (q, v), eigen::split_at_row(x, model.config_dim()));
 
 		model.neutral_configuration(q);
 		v.setZero();
 	}
-	void random_configuration(view<T, colvec> x) const {
+	void random_configuration(View<T, colvec> x) const {
 		VEG_BIND(auto, (q, v), eigen::split_at_row(x, model.config_dim()));
 		model.random_configuration(q);
 		v.setRandom();
@@ -338,21 +335,24 @@ struct pinocchio_contact_dynamics { /* NOLINT */
 
 	auto state_space() const -> pinocchio_state_space<T> { return {model}; }
 	auto output_space() const -> pinocchio_state_space<T> { return {model}; }
-	auto control_space() const -> vector_space<T> {
-		return vector_space<T>{model.tangent_dim()};
+	auto control_space() const -> VectorSpace<T> {
+		return VectorSpace<T>{model.tangent_dim()};
 	}
 
-	auto eval_to_req() const -> mem_req {
+	auto eval_to_req() const -> MemReq {
 		i64 nv = model.tangent_dim();
-		return {tag<T>, nv + i64(3U * frame_ids.size()) * (nv + 1) + 6 * nv};
+		return {
+				tag<T>,
+				nv + i64(3U * frame_ids.size()) * (nv + 1) + 6 * nv,
+		};
 	}
 	auto eval_to(
-			view<T, colvec> f_out,
+			View<T, colvec> f_out,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> u,
-			key k,
-			DynStackView stack) const -> key {
+			View<T const, colvec> x,
+			View<T const, colvec> u,
+			Key k,
+			DynStackView stack) const -> Key {
 
 		unused(t);
 		Slice<i64 const> frames = {as_ref, frame_ids};
@@ -402,7 +402,7 @@ struct pinocchio_contact_dynamics { /* NOLINT */
 				k = model.d_frame_se3(eigen::as_mut(j), frames[i], VEG_FWD(k));
 				auto res = model.frame_classical_acceleration(frames[i], VEG_FWD(k));
 				k = VEG_FWD(res)[0_c];
-				pinocchio::motion<T> m = VEG_FWD(res)[1_c];
+				pinocchio::Motion<T> m = VEG_FWD(res)[1_c];
 
 				VEG_BIND(
 						auto,
@@ -443,19 +443,19 @@ struct pinocchio_contact_dynamics { /* NOLINT */
 		return k;
 	}
 
-	auto d_eval_to_req() const -> mem_req {
+	auto d_eval_to_req() const -> MemReq {
 		unused(this);
 		return {tag<T>, 0};
 	}
 	auto d_eval_to(
-			view<T, colmat> fx,
-			view<T, colmat> fu,
-			view<T, colvec> f,
+			View<T, colmat> fx,
+			View<T, colmat> fu,
+			View<T, colvec> f,
 			i64 t,
-			view<T const, colvec> x,
-			view<T const, colvec> u,
-			key k,
-			DynStackView stack) const -> key {
+			View<T const, colvec> x,
+			View<T const, colvec> u,
+			Key k,
+			DynStackView stack) const -> Key {
 
 		unused(t);
 
@@ -522,27 +522,26 @@ struct pinocchio_contact_dynamics { /* NOLINT */
 		return k;
 	}
 
-	using ref_type = pinocchio_contact_dynamics const&;
+	using Ref = PinocchioContact const&;
 };
 
-namespace make {
-namespace fn {
-struct pinocchio_dynamics_free {
+namespace nb {
+struct pinocchio_free {
 	VEG_TEMPLATE(
 			(typename T),
 			requires(true),
 			auto
 			operator(),
-			(model, pinocchio::model<T> const&),
+			(model, pinocchio::Model<T> const&),
 			(dt, typename meta::type_identity<T>::type),
 			(can_use_first_order_diff = false, bool))
-	const->ddp::pinocchio_dynamics_free<T> {
+	const->PinocchioFree<T> {
 		VEG_ASSERT_ELSE("unimplemented", !can_use_first_order_diff);
 		return {model, dt, can_use_first_order_diff};
 	}
 };
 
-struct lqr_dynamics {
+struct lqr {
 	VEG_TEMPLATE(
 			(typename A, typename B, typename C),
 			requires true,
@@ -551,19 +550,19 @@ struct lqr_dynamics {
 			(a, A const&),
 			(b, B const&),
 			(c, C const&))
-	const->ddp::lqr_dynamics<typename A::Scalar> {
+	const->Lqr<typename A::Scalar> {
 		using T = typename A::Scalar;
 		return {
-				eigen::matrix<T, colmat>(a),
-				eigen::matrix<T, colmat>(b),
-				eigen::matrix<T, colvec>(c),
+				eigen::Matrix<T, colmat>(a),
+				eigen::Matrix<T, colmat>(b),
+				eigen::Matrix<T, colvec>(c),
 		};
 	}
 };
-} // namespace fn
-VEG_INLINE_VAR(lqr_dynamics, fn::lqr_dynamics);
-VEG_INLINE_VAR(pinocchio_dynamics_free, fn::pinocchio_dynamics_free);
-} // namespace make
+} // namespace nb
+VEG_NIEBLOID(lqr);
+VEG_NIEBLOID(pinocchio_free);
+} // namespace dynamics
 
 } // namespace ddp
 

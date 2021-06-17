@@ -5,27 +5,27 @@
 #include "veg/internal/prologue.hpp"
 
 namespace ddp {
-
+namespace cost {
 template <typename T>
-struct quadratic_cost_fixed_size {
-	eigen::heap_matrix<T, colvec> q;
-	eigen::heap_matrix<T, colmat> Q;
-	eigen::heap_matrix<T, colvec> r;
-	eigen::heap_matrix<T, colmat> R;
-	eigen::heap_matrix<T, colvec> rf;
-	eigen::heap_matrix<T, colmat> Rf;
+struct HomogeneousQuadratic {
+	eigen::HeapMatrix<T, colvec> q;
+	eigen::HeapMatrix<T, colmat> Q;
+	eigen::HeapMatrix<T, colvec> r;
+	eigen::HeapMatrix<T, colmat> R;
+	eigen::HeapMatrix<T, colvec> rf;
+	eigen::HeapMatrix<T, colmat> Rf;
 
-	struct ref_type {
-		eigen::view<T const, colvec> q;
-		eigen::view<T const, colmat> Q;
-		eigen::view<T const, colvec> r;
-		eigen::view<T const, colmat> R;
-		eigen::view<T const, colvec> rf;
-		eigen::view<T const, colmat> Rf;
+	struct Ref {
+		eigen::View<T const, colvec> q;
+		eigen::View<T const, colmat> Q;
+		eigen::View<T const, colvec> r;
+		eigen::View<T const, colmat> R;
+		eigen::View<T const, colvec> rf;
+		eigen::View<T const, colmat> Rf;
 
-		auto eval_req() const -> mem_req { return {tag<T>, 0}; }
-		auto d_eval_to_req() const -> mem_req {
-			return mem_req::max_of({
+		auto eval_req() const -> MemReq { return {tag<T>, 0}; }
+		auto d_eval_to_req() const -> MemReq {
+			return MemReq::max_of({
 					as_ref,
 					{
 							{tag<T>, q.rows()},
@@ -34,10 +34,10 @@ struct quadratic_cost_fixed_size {
 					},
 			});
 		}
-		auto dd_eval_to_req() const -> mem_req { return {tag<T>, 0}; }
+		auto dd_eval_to_req() const -> MemReq { return {tag<T>, 0}; }
 
 		template <typename Key>
-		auto eval_final(view<T const, colvec> x, Key k, DynStackView stack) const
+		auto eval_final(View<T const, colvec> x, Key k, DynStackView stack) const
 				-> Tuple<Key, T> {
 			auto nx = rf.rows();
 			VEG_DEBUG_ASSERT_ALL_OF(x.rows() == nx);
@@ -48,8 +48,8 @@ struct quadratic_cost_fixed_size {
 
 		template <typename Key>
 		auto d_eval_final_to(
-				view<T, colvec> out_x,
-				view<T const, colvec> x,
+				View<T, colvec> out_x,
+				View<T const, colvec> x,
 				Key k,
 				DynStackView stack) const -> Key {
 			auto nx = r.rows();
@@ -64,8 +64,8 @@ struct quadratic_cost_fixed_size {
 
 		template <typename Key>
 		auto dd_eval_final_to(
-				view<T, colmat> out_xx,
-				view<T const, colvec> x,
+				View<T, colmat> out_xx,
+				View<T const, colvec> x,
 				Key k,
 				DynStackView stack) const -> Key {
 			auto nx = rf.rows();
@@ -79,8 +79,8 @@ struct quadratic_cost_fixed_size {
 		template <typename Key>
 		auto eval(
 				i64 t,
-				view<T const, colvec> x,
-				view<T const, colvec> u,
+				View<T const, colvec> x,
+				View<T const, colvec> u,
 				Key k,
 				DynStackView stack) const -> Tuple<Key, T> {
 
@@ -112,11 +112,11 @@ struct quadratic_cost_fixed_size {
 
 		template <typename Key>
 		auto d_eval_to(
-				view<T, colvec> out_x,
-				view<T, colvec> out_u,
+				View<T, colvec> out_x,
+				View<T, colvec> out_u,
 				i64 t,
-				view<T const, colvec> x,
-				view<T const, colvec> u,
+				View<T const, colvec> x,
+				View<T const, colvec> u,
 				Key k,
 				DynStackView stack) const -> Key {
 
@@ -139,12 +139,12 @@ struct quadratic_cost_fixed_size {
 
 		template <typename Key>
 		auto dd_eval_to(
-				view<T, colmat> out_xx,
-				view<T, colmat> out_ux,
-				view<T, colmat> out_uu,
+				View<T, colmat> out_xx,
+				View<T, colmat> out_ux,
+				View<T, colmat> out_uu,
 				i64 t,
-				view<T const, colvec> x,
-				view<T const, colvec> u,
+				View<T const, colvec> x,
+				View<T const, colvec> u,
 				Key k,
 				DynStackView stack) const -> Key {
 
@@ -163,7 +163,7 @@ struct quadratic_cost_fixed_size {
 	};
 
 	template <typename Dynamics>
-	auto ref(Dynamics const& /*unused*/) noexcept -> ref_type {
+	auto ref(Dynamics const& /*unused*/) noexcept -> Ref {
 		return {
 				q.get(),
 				Q.get(),
@@ -175,17 +175,16 @@ struct quadratic_cost_fixed_size {
 	}
 };
 
-namespace make {
-namespace fn {
-struct quadratic_cost_fixed_size_fn {
+namespace nb {
+struct homogeneous_quadratic {
 	template <typename T>
 	auto operator()(
-			eigen::heap_matrix<T, colvec> q,
-			eigen::heap_matrix<T, colmat> Q,
-			eigen::heap_matrix<T, colvec> r,
-			eigen::heap_matrix<T, colmat> R,
-			eigen::heap_matrix<T, colvec> rf,
-			eigen::heap_matrix<T, colmat> Rf) const -> quadratic_cost_fixed_size<T> {
+			eigen::HeapMatrix<T, colvec> q,
+			eigen::HeapMatrix<T, colmat> Q,
+			eigen::HeapMatrix<T, colvec> r,
+			eigen::HeapMatrix<T, colmat> R,
+			eigen::HeapMatrix<T, colvec> rf,
+			eigen::HeapMatrix<T, colmat> Rf) const -> HomogeneousQuadratic<T> {
 		auto nq = q.get().rows();
 		auto nr = r.get().rows();
 		unused(nq, nr);
@@ -207,9 +206,9 @@ struct quadratic_cost_fixed_size_fn {
 		};
 	}
 };
-} // namespace fn
-VEG_INLINE_VAR(quadratic_cost_fixed_size, fn::quadratic_cost_fixed_size_fn);
-} // namespace make
+} // namespace nb
+VEG_NIEBLOID(homogeneous_quadratic);
+} // namespace cost
 
 } // namespace ddp
 

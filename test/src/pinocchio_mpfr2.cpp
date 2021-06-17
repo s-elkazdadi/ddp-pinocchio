@@ -2,7 +2,7 @@
 #include <ddp/pinocchio_model.ipp>
 #include <mpfr/mpfr.hpp>
 
-using scalar = mpfr::mp_float_t<mpfr::digits10(500)>;
+using Scalar = mpfr::mp_float_t<mpfr::digits10(500)>;
 
 namespace pinocchio {
 // We check std::numeric_limits<_>::has_infinity to exclude integral, rational
@@ -26,4 +26,4 @@ struct SINCOSAlgo<
 };
 } // namespace pinocchio
 
-template struct ddp::pinocchio::model<scalar>;
+template struct ddp::pinocchio::Model<Scalar>;

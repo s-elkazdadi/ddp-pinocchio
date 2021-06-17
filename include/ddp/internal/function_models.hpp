@@ -8,49 +8,50 @@
 namespace ddp {
 namespace internal {
 
-template <typename Scalar, typename State_Space>
-struct affine_function_seq {
-	using state_space = State_Space;
-	using scalar = Scalar;
+template <typename Scalar_, typename State_Space>
+struct AffineFnSeq {
+	using StateSpace = State_Space;
+	using Scalar = Scalar_;
 
-	static_assert(VEG_CONCEPT(same<scalar, typename State_Space::scalar>), "");
+	static_assert(VEG_CONCEPT(same<Scalar, typename State_Space::Scalar>), "");
 
-	struct layout {
-		mat_seq<scalar, colvec> origin;
-		mat_seq<scalar, colvec> val;
-		mat_seq<scalar, colmat> jac;
-		state_space in;
+	struct Layout {
+		MatSeq<Scalar, colvec> origin;
+		MatSeq<Scalar, colvec> val;
+		MatSeq<Scalar, colmat> jac;
+		StateSpace in;
 	} self;
 
-	explicit affine_function_seq(layout l) : self{VEG_FWD(l)} {}
+	explicit AffineFnSeq(Layout l) : self{VEG_FWD(l)} {}
 
 	template <typename Output_Space>
-	affine_function_seq(i64 begin, i64 end, state_space in, Output_Space out)
+	AffineFnSeq(i64 begin, i64 end, StateSpace in, Output_Space out)
 			: self{
-						mat_seq<scalar, colvec>{ddp::space_to_idx(in, begin, end)},
-						mat_seq<scalar, colvec>{ddp::space_to_idx(out, begin, end)},
-						mat_seq<scalar, colmat>{
-								{begin,
-	               end,
-	               [&](i64 t) {
-									 return idx::dims<colmat>{out.dim(t), in.dim(t)};
-								 }}},
+						MatSeq<Scalar, colvec>{ddp::space_to_idx(in, begin, end)},
+						MatSeq<Scalar, colvec>{ddp::space_to_idx(out, begin, end)},
+						MatSeq<Scalar, colmat>{{
+								begin,
+								end,
+								[&](i64 t) {
+									return idx::Dims<colmat>{out.dim(t), in.dim(t)};
+								},
+						}},
 						VEG_FWD(in),
 				} {}
 
-	auto update_origin_req() const -> mem_req {
-		return mem_req::sum_of({
+	auto update_origin_req() const -> MemReq {
+		return MemReq::sum_of({
 				as_ref,
 				{
 						{
-								tag<scalar>,
+								tag<Scalar>,
 								(self.in.max_ddim()                                  // diff
 		             + self.in.max_ddim() * self.in.max_ddim()           // diff_jac
 		             + self.jac.self.idx.max_rows() * self.in.max_ddim() // tmp
 		             ),
 						},
 
-						mem_req::max_of({
+						MemReq::max_of({
 								as_ref,
 								{
 										self.in.difference_req(),
@@ -61,21 +62,21 @@ struct affine_function_seq {
 		});
 	}
 
-	auto eval_to_req() const -> mem_req {
-		return mem_req::sum_of({
+	auto eval_to_req() const -> MemReq {
+		return MemReq::sum_of({
 				as_ref,
 				{
-						{tag<scalar>, self.in.max_ddim()},
+						{tag<Scalar>, self.in.max_ddim()},
 						self.in.difference_req(),
 				},
 		});
 	}
 	void eval_to(
-			view<scalar, colvec> out,
+			View<Scalar, colvec> out,
 			i64 t,
-			view<scalar const, colvec> in,
+			View<Scalar const, colvec> in,
 			DynStackView stack) const {
-		DDP_TMP_VECTOR_UNINIT(stack, tmp, scalar, self.jac[t].cols());
+		DDP_TMP_VECTOR_UNINIT(stack, tmp, Scalar, self.jac[t].cols());
 
 		self.in.difference(tmp, t, self.origin[t], in, stack);
 		if (out.rows() > 0) {
@@ -85,7 +86,7 @@ struct affine_function_seq {
 	}
 
 	void
-	update_origin(mat_seq<scalar, colvec> const& new_traj, DynStackView stack) {
+	update_origin(MatSeq<Scalar, colvec> const& new_traj, DynStackView stack) {
 
 		auto begin = self.origin.index_begin();
 		auto end = self.origin.index_end();
@@ -104,9 +105,9 @@ struct affine_function_seq {
 				auto ndo = jac.rows();
 				auto ndi = jac.cols();
 
-				DDP_TMP_VECTOR_UNINIT(stack, diff, scalar, ndi);
-				DDP_TMP_MATRIX_UNINIT(stack, diff_jac, scalar, ndi, ndi);
-				DDP_TMP_MATRIX(stack, tmp, scalar, ndo, ndi);
+				DDP_TMP_VECTOR_UNINIT(stack, diff, Scalar, ndi);
+				DDP_TMP_MATRIX_UNINIT(stack, diff_jac, Scalar, ndi, ndi);
+				DDP_TMP_MATRIX(stack, tmp, Scalar, ndo, ndi);
 
 				self.in.difference(diff, t, eigen::as_const(origin), new_origin, stack);
 				self.in.d_difference_d_finish(
@@ -122,23 +123,23 @@ struct affine_function_seq {
 	}
 };
 
-template <typename Scalar>
-struct constant_function_seq {
-	using scalar = Scalar;
+template <typename Scalar_>
+struct ConstantFnSeq {
+	using Scalar = Scalar_;
 
-	mat_seq<scalar, colvec> val;
+	MatSeq<Scalar, colvec> val;
 
 	template <typename Output_Space>
-	constant_function_seq(i64 begin, i64 end, Output_Space out)
+	ConstantFnSeq(i64 begin, i64 end, Output_Space out)
 			: val{ddp::space_to_idx(out, begin, end)} {}
 
-	auto update_origin_req() const -> mem_req { return {tag<scalar>, 0}; }
-	auto eval_to_req() const -> mem_req { return {tag<scalar>, 0}; }
+	auto update_origin_req() const -> MemReq { return {tag<Scalar>, 0}; }
+	auto eval_to_req() const -> MemReq { return {tag<Scalar>, 0}; }
 
 	void eval_to(
-			view<scalar, colvec> out,
+			View<Scalar, colvec> out,
 			i64 t,
-			view<scalar const, colvec> in,
+			View<Scalar const, colvec> in,
 			DynStackView stack) const {
 
 		unused(stack, in, t);
@@ -146,7 +147,7 @@ struct constant_function_seq {
 	}
 
 	void
-	update_origin(mat_seq<scalar, colvec> const& new_traj, DynStackView stack) {
+	update_origin(MatSeq<Scalar, colvec> const& new_traj, DynStackView stack) {
 		unused(this, new_traj, stack);
 	}
 };

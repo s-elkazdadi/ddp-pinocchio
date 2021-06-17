@@ -25,9 +25,9 @@ using veg::usize;
 auto main() -> int {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
 	i64 horizon = 10;
-	eigen::matrix<scalar, ddp::colvec> empty(0);
+	eigen::Matrix<scalar, ddp::colvec> empty(0);
 
-	ddp::pinocchio::model<scalar> m{
+	ddp::pinocchio::Model<scalar> m{
 			EXAMPLE_ROBOT_DATA_MODEL_DIR "/ur_description/urdf/ur5_gripper.urdf",
 			::omp_get_num_procs()};
 
@@ -39,17 +39,17 @@ auto main() -> int {
 	i64 nu = nv;
 	i64 ndu = nv;
 
-	auto dynamics = ddp::make::pinocchio_dynamics_free(m, 0.01);
+	auto dynamics = ddp::dynamics::pinocchio_free(m, 0.01);
 
-	auto constraint = ddp::no_constraint<decltype(dynamics)>{};
+	auto constraint = ddp::constraint::null(dynamics);
 
 	auto cost = [&] {
-		eigen::heap_matrix<scalar, ddp::colvec> u0(ndu);
-		eigen::heap_matrix<scalar, ddp::colmat> U0(ndu, ndu);
-		eigen::heap_matrix<scalar, ddp::colvec> x0(ndx);
-		eigen::heap_matrix<scalar, ddp::colmat> X0(ndx, ndx);
-		eigen::heap_matrix<scalar, ddp::colvec> xf(ndx);
-		eigen::heap_matrix<scalar, ddp::colmat> Xf(ndx, ndx);
+		eigen::HeapMatrix<scalar, ddp::colvec> u0{ddp::eigen::with_dims, ndu};
+		eigen::HeapMatrix<scalar, ddp::colmat> U0{ddp::eigen::with_dims, ndu, ndu};
+		eigen::HeapMatrix<scalar, ddp::colvec> x0{ddp::eigen::with_dims, ndx};
+		eigen::HeapMatrix<scalar, ddp::colmat> X0{ddp::eigen::with_dims, ndx, ndx};
+		eigen::HeapMatrix<scalar, ddp::colvec> xf{ddp::eigen::with_dims, ndx};
+		eigen::HeapMatrix<scalar, ddp::colmat> Xf{ddp::eigen::with_dims, ndx, ndx};
 
 		u0.mut().setZero();
 		x0.mut().setZero();
@@ -60,7 +60,7 @@ auto main() -> int {
 		Xf.mut().setIdentity();
 		Xf.mut() *= 1e2;
 
-		return ddp::make::quadratic_cost_fixed_size(
+		return ddp::cost::homogeneous_quadratic(
 				VEG_FWD(u0),
 				VEG_FWD(U0),
 				VEG_FWD(x0),
@@ -69,12 +69,12 @@ auto main() -> int {
 				VEG_FWD(Xf));
 	}();
 
-	auto solver = ddp::make::ddp(dynamics, cost, constraint);
+	auto solver = ddp::ddp(dynamics, cost, constraint);
 
 	auto traj = [&] {
-		eigen::matrix<scalar, ddp::colvec> x0(nx);
+		eigen::Matrix<scalar, ddp::colvec> x0(nx);
 		dynamics.neutral_configuration(eigen::as_mut(x0));
-		auto zero = eigen::matrix<scalar, ddp::colvec>::Zero(nu).eval();
+		auto zero = eigen::Matrix<scalar, ddp::colvec>::Zero(nu).eval();
 
 		return solver.make_trajectory( //
 				0,
@@ -85,6 +85,6 @@ auto main() -> int {
 
 	auto d = solver.make_derivative_storage(traj);
 
-	auto res = solver.solve<ddp::method::affine_multipliers>(200, 0, 1e2, traj);
+	auto res = solver.solve<ddp::Method_e::affine_multipliers>(200, 0, 1e2, traj);
 	fmt::print("{}\n", res[0_c].x_f().transpose());
 }

@@ -6,8 +6,8 @@
 namespace ddp {
 namespace idx {
 
-template <eigen::kind K>
-auto shift_time_idx(idx<K> i, i64 dt) -> idx<K> {
+template <eigen::Kind K>
+auto shift_time_idx(Idx<K> i, i64 dt) -> Idx<K> {
 	VEG_BIND(auto, (base, self), VEG_FWD(i).into_parts());
 	return {
 			base.begin - dt,
@@ -16,11 +16,11 @@ auto shift_time_idx(idx<K> i, i64 dt) -> idx<K> {
 	};
 }
 
-inline auto prod_idx(idx_view<colvec> l, idx_view<colvec> r) -> idx<colmat> {
+inline auto prod_idx(IdxView<colvec> l, IdxView<colvec> r) -> Idx<colmat> {
 	return {
 			l.index_begin(),
 			l.index_end(),
-			[&](i64 t) -> dims<colmat> {
+			[&](i64 t) -> Dims<colmat> {
 				return {l.rows(t), r.rows(t)};
 			},
 	};

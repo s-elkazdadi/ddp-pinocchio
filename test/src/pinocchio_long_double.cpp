@@ -1,3 +1,3 @@
 #include <ddp/pinocchio_model.ipp>
 
-template struct ddp::pinocchio::model<long double>;
+template struct ddp::pinocchio::Model<long double>;

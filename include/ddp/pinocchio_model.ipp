@@ -84,19 +84,19 @@ namespace pinocchio {
 namespace pin = ::pinocchio;
 
 template <typename T>
-struct model<T>::model_impl {
+struct Model<T>::ModelImpl {
 	pin::ModelTpl<T> pin;
 };
 template <typename T>
-struct model<T>::data_impl {
+struct Model<T>::DataImpl {
 	pin::DataTpl<T> pin;
 	std::atomic_bool available;
 
-	data_impl(pin::DataTpl<T> pin, bool b) : pin{VEG_FWD(pin)}, available{b} {}
+	DataImpl(pin::DataTpl<T> pin, bool b) : pin{VEG_FWD(pin)}, available{b} {}
 };
 
 template <typename T>
-void model<T>::key::destroy() {
+void Model<T>::Key::destroy() {
 	if (parent != nullptr) {
 		parent->available = true;
 		parent = nullptr;
@@ -105,7 +105,7 @@ void model<T>::key::destroy() {
 
 namespace internal {
 
-struct builder_from_urdf_t {
+struct BuilderFromUrdf {
 	::fmt::string_view urdf_path;
 	void operator()(pin::Model& model, bool add_freeflyer_base) const {
 		std::string path;
@@ -133,10 +133,10 @@ struct builder_from_urdf_t {
 	}
 };
 
-struct pinocchio_impl {
+struct PinocchioImpl {
 	template <typename T>
 	static void from_model_geom_builder(
-			model<T>& m,
+			Model<T>& m,
 			fn::FnView<void(pin::Model&, bool)> builder,
 			i64 n_parallel,
 			bool add_freeflyer_base) {
@@ -144,20 +144,20 @@ struct pinocchio_impl {
 				(n_parallel > 0),
 				(n_parallel < 256));
 
-		using model_impl = typename model<T>::model_impl;
-		using data_impl = typename model<T>::data_impl;
+		using ModelImpl = typename Model<T>::ModelImpl;
+		using DataImpl = typename Model<T>::DataImpl;
 
 		m.self.num_data = n_parallel;
-		m.self.model = static_cast<model_impl*>(boost::alignment::aligned_alloc(
-				alignof(model_impl), sizeof(model_impl)));
+		m.self.model = static_cast<ModelImpl*>(
+				boost::alignment::aligned_alloc(alignof(ModelImpl), sizeof(ModelImpl)));
 
 		if (m.self.model == nullptr) {
 			throw std::bad_alloc();
 		}
 		m.self.data =
-				mem::launder(static_cast<data_impl*>(boost::alignment::aligned_alloc(
-						alignof(data_impl),
-						narrow<usize>(m.self.num_data) * sizeof(data_impl))));
+				mem::launder(static_cast<DataImpl*>(boost::alignment::aligned_alloc(
+						alignof(DataImpl),
+						narrow<usize>(m.self.num_data) * sizeof(DataImpl))));
 
 		if (m.self.data == nullptr) {
 			boost::alignment::aligned_free(m.self.model);
@@ -166,11 +166,11 @@ struct pinocchio_impl {
 
 		pin::Model model_double{};
 		builder(model_double, add_freeflyer_base);
-		m.self.model = ::new (m.self.model) model_impl{model_double.cast<T>()};
+		m.self.model = ::new (m.self.model) ModelImpl{model_double.cast<T>()};
 
 		for (i64 i = 0; i < m.self.num_data; ++i) {
 			::new (m.self.data + i)
-					data_impl{pin::DataTpl<T>{m.self.model->pin}, true};
+					DataImpl{pin::DataTpl<T>{m.self.model->pin}, true};
 		}
 
 		m.self.config_dim = m.self.model->pin.nq;
@@ -181,27 +181,27 @@ struct pinocchio_impl {
 } // namespace internal
 
 template <typename T>
-model<T>::model(
+Model<T>::Model(
 		::fmt::string_view urdf_path, i64 n_parallel, bool add_freeflyer_base) {
 	using FnView = fn::FnView<void(pin::Model&, bool)>;
-	internal::pinocchio_impl::from_model_geom_builder(
+	internal::PinocchioImpl::from_model_geom_builder(
 			*this,
-			FnView{as_ref, internal::builder_from_urdf_t{urdf_path}},
+			FnView{as_ref, internal::BuilderFromUrdf{urdf_path}},
 			n_parallel,
 			add_freeflyer_base);
 }
 
 template <typename T>
-auto model<T>::all_joints_test_model(i64 n_parallel) -> model {
+auto Model<T>::all_joints_test_model(i64 n_parallel) -> Model {
 	using FnView = fn::FnView<void(pin::Model&, bool)>;
-	model m;
-	internal::pinocchio_impl::from_model_geom_builder(
+	Model m;
+	internal::PinocchioImpl::from_model_geom_builder(
 			m, FnView{as_ref, &pin::buildAllJointsModel}, n_parallel, false);
 	return m;
 }
 
 template <typename T>
-model<T>::~model() {
+Model<T>::~Model() {
 	VEG_ASSERT(
 			"model and data should either be both valid or both invalid (moved-from "
 			"state)",
@@ -221,12 +221,12 @@ model<T>::~model() {
 }
 
 template <typename T>
-model<T>::model(model&& other) noexcept : self{other.self} {
+Model<T>::Model(Model&& other) noexcept : self{other.self} {
 	other.self = {nullptr, nullptr, 0, 0, 0};
 }
 
 template <typename T>
-auto model<T>::acquire_workspace() const -> key {
+auto Model<T>::acquire_workspace() const -> Key {
 	for (i64 i = 0; i < self.num_data; ++i) {
 		std::atomic_bool& available = self.data[i].available;
 
@@ -234,7 +234,7 @@ auto model<T>::acquire_workspace() const -> key {
 			bool expected = true;
 			bool const changed = available.compare_exchange_strong(expected, false);
 			if (changed) {
-				return key{self.data[i]};
+				return Key{self.data[i]};
 			}
 		}
 	}
@@ -243,19 +243,19 @@ auto model<T>::acquire_workspace() const -> key {
 }
 
 template <typename T>
-auto model<T>::model_name() const -> ::fmt::string_view {
+auto Model<T>::model_name() const -> ::fmt::string_view {
 	return self.model->pin.name;
 }
 
 template <typename T>
-void model<T>::neutral_configuration(mut_vec out_q) const {
+void Model<T>::neutral_configuration(MutVec out_q) const {
 
 	VEG_DEBUG_ASSERT(out_q.rows() == self.config_dim);
 	pin::neutral(self.model->pin, out_q);
 }
 
 template <typename T>
-void model<T>::random_configuration(mut_vec out_q) const {
+void Model<T>::random_configuration(MutVec out_q) const {
 
 	VEG_DEBUG_ASSERT(out_q.rows() == self.config_dim);
 	pin::randomConfiguration(               //
@@ -267,10 +267,10 @@ void model<T>::random_configuration(mut_vec out_q) const {
 }
 
 template <typename T>
-void model<T>::integrate(
-		mut_vec out_q, //
-		const_vec q,   //
-		const_vec v    //
+void Model<T>::integrate(
+		MutVec out_q, //
+		ConstVec q,   //
+		ConstVec v    //
 ) const {
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(q.rows() == self.config_dim),
@@ -283,10 +283,10 @@ void model<T>::integrate(
 }
 
 template <typename T>
-void model<T>::d_integrate_dq(
-		mut_colmat out_q_dq, //
-		const_vec q,         //
-		const_vec v          //
+void Model<T>::d_integrate_dq(
+		MutColMat out_q_dq, //
+		ConstVec q,         //
+		ConstVec v          //
 ) const {
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(out_q_dq.rows() == self.tangent_dim),
@@ -299,10 +299,10 @@ void model<T>::d_integrate_dq(
 }
 
 template <typename T>
-void model<T>::d_integrate_dv(
-		mut_colmat out_q_dv, //
-		const_vec q,         //
-		const_vec v          //
+void Model<T>::d_integrate_dv(
+		MutColMat out_q_dv, //
+		ConstVec q,         //
+		ConstVec v          //
 ) const {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
@@ -316,10 +316,10 @@ void model<T>::d_integrate_dv(
 }
 
 template <typename T>
-void model<T>::difference(
-		mut_vec out_v,     //
-		const_vec q_start, //
-		const_vec q_finish //
+void Model<T>::difference(
+		MutVec out_v,     //
+		ConstVec q_start, //
+		ConstVec q_finish //
 ) const {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
@@ -333,10 +333,10 @@ void model<T>::difference(
 }
 
 template <typename T>
-void model<T>::d_difference_dq_start(
-		mut_colmat out_v_dq_start, //
-		const_vec q_start,         //
-		const_vec q_finish         //
+void Model<T>::d_difference_dq_start(
+		MutColMat out_v_dq_start, //
+		ConstVec q_start,         //
+		ConstVec q_finish         //
 ) const {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
@@ -356,10 +356,10 @@ void model<T>::d_difference_dq_start(
 }
 
 template <typename T>
-void model<T>::d_difference_dq_finish(
-		mut_colmat out_v_dq_finish, //
-		const_vec q_start,          //
-		const_vec q_finish          //
+void Model<T>::d_difference_dq_finish(
+		MutColMat out_v_dq_finish, //
+		ConstVec q_start,          //
+		ConstVec q_finish          //
 ) const {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
@@ -379,14 +379,14 @@ void model<T>::d_difference_dq_finish(
 }
 
 template <typename T>
-auto collect(i64 njoints, fn::FnView<Option<Tuple<i64, force<T>>>()> fext)
+auto collect(i64 njoints, fn::FnView<Option<Tuple<i64, Force<T>>>()> fext)
 		-> pin::container::aligned_vector<pin::ForceTpl<T>> {
 
 	pin::container::aligned_vector<pin::ForceTpl<T>> external_forces(
 			narrow<usize>(njoints));
 	while (true) {
 		auto res = fext();
-		if (!res) {
+		if (res.is_none()) {
 			break;
 		}
 		VEG_BIND(auto, (i, f), VEG_FWD(res).unwrap());
@@ -406,14 +406,14 @@ auto collect(i64 njoints, fn::FnView<Option<Tuple<i64, force<T>>>()> fext)
 }
 
 template <typename T>
-auto model<T>::dynamics_aba(                                     //
-		mut_vec out_acceleration,                                    //
-		const_vec q,                                                 //
-		const_vec v,                                                 //
-		const_vec tau,                                               //
-		Option<fn::FnView<Option<Tuple<i64, force<T>>>()>> fext_gen, //
-		key k                                                        //
-) const -> key {
+auto Model<T>::dynamics_aba(                                     //
+		MutVec out_acceleration,                                     //
+		ConstVec q,                                                  //
+		ConstVec v,                                                  //
+		ConstVec tau,                                                //
+		Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
+		Key k                                                        //
+) const -> Key {
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(out_acceleration.rows() == self.tangent_dim),
 			(q.rows() == self.config_dim),
@@ -424,7 +424,7 @@ auto model<T>::dynamics_aba(                                     //
 			(not tau.hasNaN()),
 			(k));
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 
 	VEG_FWD(fext_gen).map_or_else(
 			[&](auto fn) {
@@ -452,14 +452,14 @@ auto model<T>::dynamics_aba(                                     //
 }
 
 template <typename T>
-auto model<T>::inverse_dynamics_rnea(                            //
-		mut_vec out_tau,                                             //
-		const_vec q,                                                 //
-		const_vec v,                                                 //
-		const_vec a,                                                 //
-		Option<fn::FnView<Option<Tuple<i64, force<T>>>()>> fext_gen, //
-		key k                                                        //
-) const -> key {
+auto Model<T>::inverse_dynamics_rnea(                            //
+		MutVec out_tau,                                              //
+		ConstVec q,                                                  //
+		ConstVec v,                                                  //
+		ConstVec a,                                                  //
+		Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
+		Key k                                                        //
+) const -> Key {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(out_tau.rows() == self.tangent_dim),
@@ -471,7 +471,7 @@ auto model<T>::inverse_dynamics_rnea(                            //
 			(not a.hasNaN()),
 			(k));
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 
 	VEG_FWD(fext_gen).map_or_else(
 			[&](auto fn) {
@@ -499,17 +499,17 @@ auto model<T>::inverse_dynamics_rnea(                            //
 }
 
 template <typename T>
-auto model<T>::d_dynamics_aba(                                   //
-		mut_colmat out_acceleration_dq,                              //
-		mut_colmat out_acceleration_dv,                              //
-		mut_colmat out_acceleration_dtau,                            //
-		mut_vec out_acceleration,                                    //
-		const_vec q,                                                 //
-		const_vec v,                                                 //
-		const_vec tau,                                               //
-		Option<fn::FnView<Option<Tuple<i64, force<T>>>()>> fext_gen, //
-		key k                                                        //
-) const -> key {
+auto Model<T>::d_dynamics_aba(                                   //
+		MutColMat out_acceleration_dq,                               //
+		MutColMat out_acceleration_dv,                               //
+		MutColMat out_acceleration_dtau,                             //
+		MutVec out_acceleration,                                     //
+		ConstVec q,                                                  //
+		ConstVec v,                                                  //
+		ConstVec tau,                                                //
+		Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
+		Key k                                                        //
+) const -> Key {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(out_acceleration_dq.rows() == self.tangent_dim),
@@ -529,7 +529,7 @@ auto model<T>::d_dynamics_aba(                                   //
 
 			(static_cast<void*>(k.parent) != nullptr));
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 
 	VEG_FWD(fext_gen).map_or_else(
 			[&](auto fn) {
@@ -600,16 +600,16 @@ auto model<T>::d_dynamics_aba(                                   //
 }
 
 template <typename T>
-auto model<T>::d_inverse_dynamics_rnea(                          //
-		mut_colmat out_tau_dq,                                       //
-		mut_colmat out_tau_dv,                                       //
-		mut_colmat out_tau_da,                                       //
-		const_vec q,                                                 //
-		const_vec v,                                                 //
-		const_vec a,                                                 //
-		Option<fn::FnView<Option<Tuple<i64, force<T>>>()>> fext_gen, //
-		key k                                                        //
-) const -> key {
+auto Model<T>::d_inverse_dynamics_rnea(                          //
+		MutColMat out_tau_dq,                                        //
+		MutColMat out_tau_dv,                                        //
+		MutColMat out_tau_da,                                        //
+		ConstVec q,                                                  //
+		ConstVec v,                                                  //
+		ConstVec a,                                                  //
+		Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
+		Key k                                                        //
+) const -> Key {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(out_tau_dq.rows() == self.tangent_dim),
@@ -629,7 +629,7 @@ auto model<T>::d_inverse_dynamics_rnea(                          //
 
 			(k));
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 
 	VEG_FWD(fext_gen).map_or_else(
 			[&](auto fn) {
@@ -699,8 +699,8 @@ auto model<T>::d_inverse_dynamics_rnea(                          //
 }
 
 template <typename T>
-auto model<T>::compute_forward_kinematics(
-		const_vec q, const_vec v, const_vec tau, key k) const -> key {
+auto Model<T>::compute_forward_kinematics(
+		ConstVec q, ConstVec v, ConstVec tau, Key k) const -> Key {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(tau.rows() == self.tangent_dim),
@@ -708,21 +708,21 @@ auto model<T>::compute_forward_kinematics(
 			(v.rows() == self.tangent_dim),
 			(tau.rows() == self.tangent_dim));
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 	pin::forwardKinematics(self.model->pin, data->pin, q, v, tau);
 
 	return k;
 }
 
 template <typename T>
-auto model<T>::compute_forward_dynamics(
-		const_vec q,
-		const_vec v,
-		const_vec tau,
-		const_colmat J,
-		const_vec gamma,
+auto Model<T>::compute_forward_dynamics(
+		ConstVec q,
+		ConstVec v,
+		ConstVec tau,
+		ConstColMat J,
+		ConstVec gamma,
 		T inv_damping,
-		key k) const -> key {
+		Key k) const -> Key {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(tau.rows() == self.tangent_dim),
@@ -737,7 +737,7 @@ auto model<T>::compute_forward_dynamics(
 }
 
 template <typename T>
-auto model<T>::set_ddq(mut_vec a, key k) const -> key {
+auto Model<T>::set_ddq(MutVec a, Key k) const -> Key {
 
 	VEG_DEBUG_ASSERT(a.rows() == self.tangent_dim);
 
@@ -748,10 +748,10 @@ auto model<T>::set_ddq(mut_vec a, key k) const -> key {
 }
 
 template <typename T>
-auto model<T>::frame_classical_acceleration(i64 frame_id, key k) const
-		-> Tuple<key, motion<T>> {
+auto Model<T>::frame_classical_acceleration(i64 frame_id, Key k) const
+		-> Tuple<Key, Motion<T>> {
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 	auto acc = pin::getFrameClassicalAcceleration(
 			self.model->pin,
 			data->pin,
@@ -772,7 +772,7 @@ auto model<T>::frame_classical_acceleration(i64 frame_id, key k) const
 	return {
 			direct,
 			VEG_FWD(k),
-			motion<T>{
+			Motion<T>{
 					{ang[0], ang[1], ang[2]},
 					{lin[0], lin[1], lin[2]},
 			},
@@ -780,8 +780,8 @@ auto model<T>::frame_classical_acceleration(i64 frame_id, key k) const
 }
 
 template <typename T>
-auto model<T>::frame_velocity(i64 frame_id, key k) const
-		-> Tuple<key, motion<T>> {
+auto Model<T>::frame_velocity(i64 frame_id, Key k) const
+		-> Tuple<Key, Motion<T>> {
 	auto& data = k.parent->pin;
 	auto const& vel = pin::getFrameVelocity(
 			self.model->pin, data, narrow<pin::FrameIndex>(frame_id), pin::LOCAL);
@@ -792,20 +792,20 @@ auto model<T>::frame_velocity(i64 frame_id, key k) const
 	return {
 			direct,
 			VEG_FWD(k),
-			motion<T>{
+			Motion<T>{
 					{ang[0], ang[1], ang[2]},
 					{lin[0], lin[1], lin[2]},
 			}};
 }
 
 template <typename T>
-auto model<T>::d_frame_acceleration(
-		mut_colmat dv_dq,
-		mut_colmat da_dq,
-		mut_colmat da_dv,
-		mut_colmat da_da,
+auto Model<T>::d_frame_acceleration(
+		MutColMat dv_dq,
+		MutColMat da_dq,
+		MutColMat da_dv,
+		MutColMat da_da,
 		i64 frame_id,
-		key k) const -> key {
+		Key k) const -> Key {
 
 	pin::getFrameAccelerationDerivatives(
 			self.model->pin,
@@ -820,31 +820,31 @@ auto model<T>::d_frame_acceleration(
 }
 
 template <typename T>
-auto model<T>::frames_forward_kinematics(const_vec q, key k) const -> key {
+auto Model<T>::frames_forward_kinematics(ConstVec q, Key k) const -> Key {
 	VEG_DEBUG_ASSERT_ALL_OF( //
 			(q.rows() == self.config_dim),
 			(not q.hasNaN()),
 			(k));
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 	pin::framesForwardKinematics(self.model->pin, data->pin, q);
 	return k;
 }
 
 template <typename T>
-auto model<T>::compute_joint_jacobians(const_vec q, key k) const -> key {
+auto Model<T>::compute_joint_jacobians(ConstVec q, Key k) const -> Key {
 	VEG_DEBUG_ASSERT_ALL_OF( //
 			(q.rows() == self.config_dim),
 			(not q.hasNaN()),
 			(k));
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 	pin::computeJointJacobians(self.model->pin, data->pin, q);
 	return k;
 }
 
 template <typename T>
-auto model<T>::frame_se3(i64 frame_id, key k) const -> Tuple<key, se3<T>> {
+auto Model<T>::frame_se3(i64 frame_id, Key k) const -> Tuple<Key, Se3<T>> {
 
 	VEG_DEBUG_ASSERT_ALL_OF( //
 			(frame_id >= 0),
@@ -853,7 +853,7 @@ auto model<T>::frame_se3(i64 frame_id, key k) const -> Tuple<key, se3<T>> {
 
 	auto frame_uid = narrow<usize>(frame_id);
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 	auto out = data->pin.oMf[frame_uid].translation();
 
 	auto const& trans = data->pin.oMf[frame_uid].translation();
@@ -870,7 +870,7 @@ auto model<T>::frame_se3(i64 frame_id, key k) const -> Tuple<key, se3<T>> {
 	return {
 			direct,
 			VEG_FWD(k),
-			se3<T>{
+			Se3<T>{
 					// clang-format off
           {
             rot(0, 0), rot(1, 0), rot(2, 0),
@@ -884,7 +884,7 @@ auto model<T>::frame_se3(i64 frame_id, key k) const -> Tuple<key, se3<T>> {
 };
 
 template <typename T>
-auto model<T>::d_frame_se3(mut_colmat out, i64 frame_id, key k) const -> key {
+auto Model<T>::d_frame_se3(MutColMat out, i64 frame_id, Key k) const -> Key {
 	VEG_DEBUG_ASSERT_ALL_OF( //
 			(frame_id >= 0),
 			(frame_id < self.model->pin.nframes),
@@ -892,7 +892,7 @@ auto model<T>::d_frame_se3(mut_colmat out, i64 frame_id, key k) const -> key {
 			(out.cols() == self.tangent_dim),
 			(k));
 
-	data_impl* data = k.parent;
+	DataImpl* data = k.parent;
 	out.setZero();
 
 	pin::getFrameJacobian(
@@ -905,12 +905,12 @@ auto model<T>::d_frame_se3(mut_colmat out, i64 frame_id, key k) const -> key {
 };
 
 template <typename T>
-auto model<T>::n_frames() const -> i64 {
+auto Model<T>::n_frames() const -> i64 {
 	return self.model->pin.nframes;
 }
 
 template <typename T>
-auto model<T>::frame_name(i64 i) const -> ::fmt::string_view {
+auto Model<T>::frame_name(i64 i) const -> ::fmt::string_view {
 	VEG_DEBUG_ASSERT_ALL_OF( //
 			(i >= 0),
 			(i < self.model->pin.nframes));
@@ -919,8 +919,8 @@ auto model<T>::frame_name(i64 i) const -> ::fmt::string_view {
 }
 
 template <typename T>
-auto model<T>::kkt_contact_dynamics_matrix_inverse(
-		mut_colmat out, const_colmat J, key k) const -> key {
+auto Model<T>::kkt_contact_dynamics_matrix_inverse(
+		MutColMat out, ConstColMat J, Key k) const -> Key {
 	auto& model = self.model->pin;
 	auto& data = k.parent->pin;
 
@@ -930,7 +930,7 @@ auto model<T>::kkt_contact_dynamics_matrix_inverse(
 }
 
 template <typename T>
-auto model<T>::skew(const_vec v) -> skew_mat<T> {
+auto Model<T>::skew(ConstVec v) -> SkewMat<T> {
 	VEG_DEBUG_ASSERT(v.rows() == 3);
 	Eigen::Map<Eigen::Matrix<T, 3, 1, Eigen::ColMajor> const> in{v.data()};
 	Eigen::Matrix<T, 3, 3, Eigen::ColMajor> out = pin::skew(in);
@@ -938,7 +938,7 @@ auto model<T>::skew(const_vec v) -> skew_mat<T> {
 	for (i64 i = 0; i < 9; ++i) {
 		data._[i] = out.data()[i];
 	}
-	return {data};
+	return {VEG_FWD(data)};
 }
 
 } // namespace pinocchio
