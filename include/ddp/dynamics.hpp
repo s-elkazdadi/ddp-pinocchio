@@ -355,7 +355,7 @@ struct pinocchio_contact_dynamics { /* NOLINT */
 			DynStackView stack) const -> key {
 
 		unused(t);
-		Slice<i64 const> frames = frame_ids;
+		Slice<i64 const> frames = {as_ref, frame_ids};
 
 		VEG_DEBUG_ASSERT_ALL_OF(
 				(!eigen::aliases(f_out, x)), //

@@ -40,22 +40,34 @@ struct affine_function_seq {
 
 	auto update_origin_req() const -> mem_req {
 		return mem_req::sum_of({
-				{tag<scalar>,
-		     (self.in.max_ddim()                                     // diff
-		      + self.in.max_ddim() * self.in.max_ddim()              // diff_jac
-		      + self.jac.self.idx.max_rows() * self.in.max_ddim())}, // tmp
+				as_ref,
+				{
+						{
+								tag<scalar>,
+								(self.in.max_ddim()                                  // diff
+		             + self.in.max_ddim() * self.in.max_ddim()           // diff_jac
+		             + self.jac.self.idx.max_rows() * self.in.max_ddim() // tmp
+		             ),
+						},
 
-				mem_req::max_of({
-						self.in.difference_req(),
-						self.in.d_difference_d_finish_req(),
-				}),
+						mem_req::max_of({
+								as_ref,
+								{
+										self.in.difference_req(),
+										self.in.d_difference_d_finish_req(),
+								},
+						}),
+				},
 		});
 	}
 
 	auto eval_to_req() const -> mem_req {
 		return mem_req::sum_of({
-				{tag<scalar>, self.in.max_ddim()},
-				self.in.difference_req(),
+				as_ref,
+				{
+						{tag<scalar>, self.in.max_ddim()},
+						self.in.difference_req(),
+				},
 		});
 	}
 	void eval_to(

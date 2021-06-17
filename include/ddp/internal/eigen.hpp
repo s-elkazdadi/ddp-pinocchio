@@ -111,7 +111,7 @@ namespace aux {
 DDP_DEF_CONCEPT(
 		typename T,
 		has_eigen_base,
-		VEG_CONCEPT(convertible<T, Eigen::MatrixBase<T>>));
+		VEG_CONCEPT(convertible<T, Eigen::MatrixBase<T> const&>));
 
 DDP_DEF_CONCEPT(
 		typename M, has_scalar, DDP_CONCEPT(scalar<typename M::Scalar>));
@@ -916,7 +916,10 @@ struct fmt::formatter<
 				fc,
 				mat.rows(),
 				mat.cols(),
-				[&](veg::i64 i, veg::i64 j) noexcept { return mat(i, j); },
+				{
+						veg::as_ref,
+						[&](veg::i64 i, veg::i64 j) noexcept { return mat(i, j); },
+				},
 				*this);
 	}
 };
@@ -930,12 +933,12 @@ struct fmt::formatter<
 
 #define __DDP_TMP_IMPL_MAT(Stack_Func, Stack, Name, Type, Rows, Cols)          \
 	auto Name##_storage##__LINE__ =                                              \
-			(Stack).Stack_Func(::veg::Tag<Type>{}, (Rows) * (Cols)).unwrap();      \
+			(Stack).Stack_Func(::veg::Tag<Type>{}, (Rows) * (Cols)).unwrap();        \
 	auto(Name) = ::ddp::eigen::slice_to_mat(Name##_storage##__LINE__, Rows, Cols)
 
 #define __DDP_TMP_IMPL_VEC(Stack_Func, Stack, Name, Type, Rows)                \
 	auto Name##_storage##__LINE__ =                                              \
-			(Stack).Stack_Func(::veg::Tag<Type>{}, (Rows)).unwrap();               \
+			(Stack).Stack_Func(::veg::Tag<Type>{}, (Rows)).unwrap();                 \
 	auto(Name) = ::ddp::eigen::slice_to_vec(Name##_storage##__LINE__)
 
 #define DDP_TMP_MATRIX_UNINIT(Stack, Name, T, R, C)                            \

@@ -218,12 +218,15 @@ auto compute_second_derivatives_req(
 		Cost const& cost, Dynamics const& dynamics, Constraint const& constraint)
 		-> mem_req {
 	mem_req single_thread = mem_req::max_of({
-			cost.d_eval_to_req(),
-			cost.dd_eval_to_req(),
-			ddp::second_order_deriv_1_req(dynamics),
-			ddp::second_order_deriv_1_req(constraint),
-			ddp::second_order_deriv_2_req(dynamics),
-			ddp::second_order_deriv_2_req(constraint),
+			as_ref,
+			{
+					cost.d_eval_to_req(),
+					cost.dd_eval_to_req(),
+					ddp::second_order_deriv_1_req(dynamics),
+					ddp::second_order_deriv_1_req(constraint),
+					ddp::second_order_deriv_2_req(dynamics),
+					ddp::second_order_deriv_2_req(constraint),
+			},
 	});
 	i64 n = internal::n_threads();
 	return {single_thread.align, single_thread.size * n};
@@ -234,38 +237,44 @@ auto compute_second_derivatives_test_req(
 		Cost const& cost, Dynamics const& dynamics, Constraint const& constraint)
 		-> mem_req {
 	mem_req single_thread = mem_req::sum_of({
+			as_ref,
 			{
-					tag<typename Dynamics::scalar>,
-					(2 * dynamics.output_space().max_ddim()     // storage_f
-	         + 2 * constraint.output_space().max_ddim() // storage_eq
-	         + 6 * dynamics.output_space().max_ddim()   // storage_df
-	         + 6 * constraint.output_space().max_ddim() // storage_deq
+					{
+							tag<typename Dynamics::scalar>,
+							(2 * dynamics.output_space().max_ddim()     // storage_f
+	             + 2 * constraint.output_space().max_ddim() // storage_eq
+	             + 6 * dynamics.output_space().max_ddim()   // storage_df
+	             + 6 * constraint.output_space().max_ddim() // storage_deq
+	                                                        //
+	             + dynamics.output_space().max_ddim()       // storage_dx
+	             + dynamics.control_space().max_ddim()      // storage_du
 
-	         + dynamics.output_space().max_ddim()  // storage_dx
-	         + dynamics.control_space().max_ddim() // storage_du
+	             // inside finite_diff_err
+	             + dynamics.output_space().max_ddim()  // storage_dx
+	             + dynamics.control_space().max_ddim() // storage_du
+	                                                   //
+	             + dynamics.output_space().max_dim()   // storage_x
+	             + dynamics.control_space().max_dim()  // storage_u
+	                                                   //
+	             + dynamics.output_space().max_dim()   // storage_dotx
+	             + dynamics.control_space().max_dim()  // storage_dotu
 
-	         // inside finite_diff_err
-	         + dynamics.output_space().max_ddim()  // storage_dx
-	         + dynamics.control_space().max_ddim() // storage_du
+	             ),
+					},
 
-	         + dynamics.output_space().max_dim()  // storage_x
-	         + dynamics.control_space().max_dim() // storage_u
-
-	         + dynamics.output_space().max_dim()  // storage_dotx
-	         + dynamics.control_space().max_dim() // storage_dotu
-
-	         ),
+					mem_req::max_of({
+							as_ref,
+							{
+									dynamics.state_space().integrate_req(),     //
+									dynamics.control_space().integrate_req(),   //
+									dynamics.output_space().difference_req(),   //
+									constraint.output_space().difference_req(), //
+									cost.eval_req(),                            //
+									dynamics.eval_to_req(),                     //
+									constraint.eval_to_req(),                   //
+							},
+					}),
 			},
-
-			mem_req::max_of({
-					dynamics.state_space().integrate_req(),     //
-					dynamics.control_space().integrate_req(),   //
-					dynamics.output_space().difference_req(),   //
-					constraint.output_space().difference_req(), //
-					cost.eval_req(),                            //
-					dynamics.eval_to_req(),                     //
-					constraint.eval_to_req(),                   //
-			}),
 	});
 	i64 n = internal::n_threads();
 	return {single_thread.align, single_thread.size * n};
@@ -324,8 +333,8 @@ auto compute_second_derivatives(
 				i64 const thread_num = omp_get_thread_num();
 				VEG_ASSERT(thread_num < internal::n_threads());
 
-				DynStackView thread_stack = {
-						slice(stack_buffers[omp_get_thread_num()].as_ref().unwrap())};
+				DynStackView thread_stack = {slice::from_range(
+						stack_buffers[omp_get_thread_num()].as_ref().unwrap())};
 
 				if (thread_num == 0) {
 					k = cost.d_eval_final_to(derivs.lfx(), traj.x_f(), VEG_FWD(k), stack);

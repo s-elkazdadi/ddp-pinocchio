@@ -207,6 +207,8 @@ public:
 			T inv_damping,
 			key k) const -> key;
 
+	auto set_ddq(mut_vec a, key k) const -> key;
+
 	auto compute_frames_forward_kinematics(const_vec q, key k) const -> key;
 
 	auto compute_joint_jacobians(const_vec q, key k) const -> key;

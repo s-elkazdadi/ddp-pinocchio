@@ -39,10 +39,20 @@ template <typename Idx, eigen::kind K>
 struct idx_base {
 	auto derived() const -> Idx const& { return static_cast<Idx const&>(*this); }
 	auto dim_data() const -> Slice<dims<K> const> {
-		return {derived().dim_data_impl(), index_end() - index_begin()};
+		return {
+				from_raw_parts,
+				derived().dim_data_impl(),
+				index_end() - index_begin(),
+				unsafe,
+		};
 	}
 	auto offset_data() const -> Slice<i64 const> {
-		return {derived().offset_data_impl(), index_end() - index_begin() + 1};
+		return {
+				from_raw_parts,
+				derived().offset_data_impl(),
+				index_end() - index_begin() + 1,
+				unsafe,
+		};
 	}
 
 	using layout = internal::layout;

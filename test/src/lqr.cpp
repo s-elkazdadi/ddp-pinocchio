@@ -6,11 +6,13 @@
 
 #include <boost/multiprecision/mpfr.hpp>
 
-namespace mp = boost::multiprecision;
-using bignum_boost = mp::number<
-		mp::backends::mpfr_float_backend<500, mp::allocate_stack>,
-		mp::et_off>;
+namespace boostmp = boost::multiprecision;
+using bignum_boost = boostmp::number<
+		boostmp::backends::mpfr_float_backend<500, boostmp::allocate_stack>,
+		boostmp::et_off>;
 using scalar = double;
+
+DDP_CHECK_CONCEPT(scalar<scalar>);
 
 namespace eigen = ddp::eigen;
 using namespace veg::literals;

@@ -29,10 +29,20 @@ template <typename Idx>
 struct tensor_idx_view_base {
 	auto derived() const -> Idx const& { return static_cast<Idx const&>(*this); }
 	auto dim_data() const -> Slice<tensor_dims const> {
-		return {derived().dim_data(), index_end() - index_begin()};
+		return {
+				from_raw_parts,
+				derived().dim_data(),
+				index_end() - index_begin(),
+				unsafe,
+		};
 	}
 	auto offset_data() const -> Slice<i64 const> {
-		return {derived().offset_data(), index_end() - index_begin() + 1};
+		return {
+				from_raw_parts,
+				derived().offset_data(),
+				index_end() - index_begin() + 1,
+				unsafe,
+		};
 	}
 
 	using layout = internal::tensor_layout;
@@ -311,10 +321,16 @@ struct tensor_seq {
 						VEG_FWD(idx)} {}
 
 	auto as_view() const -> tensor_seq_view<T const> {
-		return {self.idx.as_view(), self.data};
+		return {
+				self.idx.as_view(),
+				{as_ref, self.data},
+		};
 	}
 	auto as_view() -> tensor_seq_view<T> {
-		return {self.idx.as_view(), self.data};
+		return {
+				self.idx.as_view(),
+				{as_ref, self.data},
+		};
 		;
 	}
 

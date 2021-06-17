@@ -8,11 +8,13 @@ namespace ddp {
 
 template <typename Fn>
 auto second_order_deriv_1_req(Fn const& fn) noexcept -> mem_req {
-	return mem_req::max_of({
-			fn.d_eval_to_req(),
-			fn.state_space().integrate_req(),
-			fn.control_space().integrate_req(),
-	});
+	return mem_req::max_of(
+			{as_ref,
+	     {
+					 fn.d_eval_to_req(),
+					 fn.state_space().integrate_req(),
+					 fn.control_space().integrate_req(),
+			 }});
 }
 
 template <typename Fn, typename Key, typename T = typename Fn::scalar>
@@ -128,13 +130,16 @@ template <typename Fn>
 auto second_order_deriv_2_req(Fn const& fn) -> mem_req {
 	mem_req init = fn.d_eval_to_req();
 
-	mem_req max_ = mem_req::sum_of(
-
+	mem_req max_ = mem_req::sum_of({
+			as_ref,
 			{mem_req::max_of({
-					 fn.state_space().integrate_req(),
-					 fn.control_space().integrate_req(),
-					 fn.output_space().difference_req(),
-					 fn.eval_to_req(),
+					 as_ref,
+					 {
+							 fn.state_space().integrate_req(),
+							 fn.control_space().integrate_req(),
+							 fn.output_space().difference_req(),
+							 fn.eval_to_req(),
+					 },
 			 }),
 
 	     {tag<typename Fn::scalar>,
@@ -144,9 +149,10 @@ auto second_order_deriv_2_req(Fn const& fn) -> mem_req {
 	       + fn.control_space().max_dim()  // u1
 	       + fn.state_space().max_ddim()   // dx
 	       + fn.control_space().max_ddim() // du
-	       )}});
+	       )}},
+	});
 
-	return mem_req::max_of({init, max_});
+	return mem_req::max_of({as_ref, {init, max_}});
 }
 
 template <typename Fn, typename T = typename Fn::scalar>

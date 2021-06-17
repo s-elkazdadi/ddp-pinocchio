@@ -186,7 +186,7 @@ model<T>::model(
 	using FnView = fn::FnView<void(pin::Model&, bool)>;
 	internal::pinocchio_impl::from_model_geom_builder(
 			*this,
-			FnView{internal::builder_from_urdf_t{urdf_path}},
+			FnView{as_ref, internal::builder_from_urdf_t{urdf_path}},
 			n_parallel,
 			add_freeflyer_base);
 }
@@ -196,7 +196,7 @@ auto model<T>::all_joints_test_model(i64 n_parallel) -> model {
 	using FnView = fn::FnView<void(pin::Model&, bool)>;
 	model m;
 	internal::pinocchio_impl::from_model_geom_builder(
-			m, FnView{&pin::buildAllJointsModel}, n_parallel, false);
+			m, FnView{as_ref, &pin::buildAllJointsModel}, n_parallel, false);
 	return m;
 }
 
@@ -393,8 +393,14 @@ auto collect(i64 njoints, fn::FnView<Option<Tuple<i64, force<T>>>()> fext)
 		auto ui = narrow<usize>(i);
 
 		VEG_ASSERT(i < njoints);
-		external_forces[ui].angular() = eigen::slice_to_vec(f.angular);
-		external_forces[ui].linear() = eigen::slice_to_vec(f.linear);
+		{
+			auto _ = slice::from_array(f.angular._);
+			external_forces[ui].angular() = eigen::slice_to_vec(_);
+		}
+		{
+			auto _ = slice::from_array(f.linear._);
+			external_forces[ui].linear() = eigen::slice_to_vec(_);
+		}
 	}
 	return external_forces;
 }
@@ -733,9 +739,8 @@ auto model<T>::compute_forward_dynamics(
 template <typename T>
 auto model<T>::set_ddq(mut_vec a, key k) const -> key {
 
-	VEG_DEBUG_ASSERT(q.rows() == self.config_dim);
+	VEG_DEBUG_ASSERT(a.rows() == self.tangent_dim);
 
-	auto& model = self.model->pin;
 	auto& data = k.parent->pin;
 	eigen::assign(a, data.ddq);
 
@@ -931,7 +936,7 @@ auto model<T>::skew(const_vec v) -> skew_mat<T> {
 	Eigen::Matrix<T, 3, 3, Eigen::ColMajor> out = pin::skew(in);
 	Array<T, 9> data;
 	for (i64 i = 0; i < 9; ++i) {
-		data[i] = out.data()[i];
+		data._[i] = out.data()[i];
 	}
 	return {data};
 }

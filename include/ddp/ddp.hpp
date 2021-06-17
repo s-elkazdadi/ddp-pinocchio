@@ -156,8 +156,7 @@ struct ddp {
 				narrow<usize>(
 						dynamics.eval_to_req().size + dynamics.eval_to_req().align));
 
-		auto stack =
-				DynStackView({stack_storage.data(), narrow<i64>(stack_storage.size())});
+		auto stack = DynStackView(slice::from_range(stack_storage));
 		auto k = dynamics.acquire_workspace();
 
 		VEG_DEBUG_ASSERT(x_init.rows() == traj[begin][0_c].rows());
@@ -255,13 +254,20 @@ struct ddp {
 	template <typename Mult_Seq>
 	auto optimality_obj_req(Mult_Seq const& mults) const -> mem_req {
 		return mem_req::sum_of({
-				mem_req{tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
-				mem_req{tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
-				mem_req{
-						tag<scalar>, constraint.ref(dynamics).output_space().max_ddim()},
-				mem_req{
-						tag<scalar>, constraint.ref(dynamics).control_space().max_ddim()},
-				mults.eq.eval_to_req(),
+				as_ref,
+				{
+						mem_req{
+								tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
+						mem_req{
+								tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
+						mem_req{
+								tag<scalar>,
+								constraint.ref(dynamics).output_space().max_ddim()},
+						mem_req{
+								tag<scalar>,
+								constraint.ref(dynamics).control_space().max_ddim()},
+						mults.eq.eval_to_req(),
+				},
 		});
 	}
 
@@ -356,11 +362,14 @@ struct ddp {
 	auto update_derivatives_req(
 			control_feedback const& fb_seq, Mults const& mults) const -> mem_req {
 		return mem_req::max_of({
-				internal::compute_second_derivatives_req(
-						cost.ref(dynamics), dynamics, constraint.ref(dynamics)),
-				mults.eq.update_origin_req(),
-				fb_seq.update_origin_req(),
-				optimality_obj_req(mults),
+				as_ref,
+				{
+						internal::compute_second_derivatives_req(
+								cost.ref(dynamics), dynamics, constraint.ref(dynamics)),
+						mults.eq.update_origin_req(),
+						fb_seq.update_origin_req(),
+						optimality_obj_req(mults),
+				},
 		});
 	}
 
@@ -464,19 +473,27 @@ struct ddp {
 
 		mem_req req = //
 				mem_req::max_of({
-						mem_req::sum_of({
-								update_derivatives_req(ctrl, mult),
-								internal::compute_second_derivatives_test_req(
-										cost.ref(dynamics), dynamics, constraint.ref(dynamics)),
-						}),
-						fwd_pass_req(traj, mult),
-						bwd_pass_req(),
+						as_ref,
+						{
+								mem_req::sum_of({
+										as_ref,
+										{
+												update_derivatives_req(ctrl, mult),
+												internal::compute_second_derivatives_test_req(
+														cost.ref(dynamics),
+														dynamics,
+														constraint.ref(dynamics)),
+										},
+								}),
+								fwd_pass_req(traj, mult),
+								bwd_pass_req(),
+						},
 				});
 		;
 		auto stack_storage =
 				std::vector<unsigned char>(narrow<usize>(req.align + req.size));
 
-		DynStackView stack(Slice<void>{stack_storage});
+		DynStackView stack(slice::from_range(stack_storage));
 
 		internal::thread_perf single{0, 0, false};
 		internal::thread_perf multi{0, 0, true};
@@ -608,20 +625,26 @@ struct ddp {
 		i64 nu = constraint.ref(dynamics).control_space().max_ddim();
 		i64 ne = constraint.ref(dynamics).output_space().max_ddim();
 		return mem_req::sum_of({
-				{tag<scalar>, nf},      // vx
-				{tag<scalar>, nf * nf}, // vxx
-				{tag<scalar>, ne},      // tmp
-				{tag<scalar>, ne * nx}, // tmp2
-				{tag<scalar>, nx},      // qx
-				{tag<scalar>, nu},      // qu
-				{tag<scalar>, nx * nx}, // qxx
-				{tag<scalar>, nu * nu}, // quu
-				{tag<scalar>, nu * nx}, // qux
-				mem_req::max_of({
-						{tag<scalar>, nf * nx}, // tmp (qxx/qux)
-						{tag<scalar>, nf * nu}, // tmp (quu)
-						{tag<scalar>, nu * nu}, // quu_clone
-				}),
+				as_ref,
+				{
+						{tag<scalar>, nf},      // vx
+						{tag<scalar>, nf * nf}, // vxx
+						{tag<scalar>, ne},      // tmp
+						{tag<scalar>, ne * nx}, // tmp2
+						{tag<scalar>, nx},      // qx
+						{tag<scalar>, nu},      // qu
+						{tag<scalar>, nx * nx}, // qxx
+						{tag<scalar>, nu * nu}, // quu
+						{tag<scalar>, nu * nx}, // qux
+						mem_req::max_of({
+								as_ref,
+								{
+										{tag<scalar>, nf * nx}, // tmp (qxx/qux)
+										{tag<scalar>, nf * nu}, // tmp (quu)
+										{tag<scalar>, nu * nu}, // quu_clone
+								},
+						}),
+				},
 		});
 	}
 	template <typename Mults>
@@ -806,15 +829,23 @@ struct ddp {
 	auto fwd_pass_req(trajectory const& traj, Mults const& mults) const
 			-> mem_req {
 		return mem_req::sum_of({
-				mem_req{tag<scalar>, 2 * (traj.index_end() - traj.index_begin() + 1)},
-				cost_seq_aug_req(mults),
-				mem_req{tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
-
-				mem_req::max_of({
-						dynamics.state_space().difference_req(),
-						dynamics.eval_to_req(),
+				as_ref,
+				{
+						mem_req{
+								tag<scalar>, 2 * (traj.index_end() - traj.index_begin() + 1)},
 						cost_seq_aug_req(mults),
-				}),
+						mem_req{
+								tag<scalar>, constraint.ref(dynamics).state_space().max_ddim()},
+
+						mem_req::max_of({
+								as_ref,
+								{
+										dynamics.state_space().difference_req(),
+										dynamics.eval_to_req(),
+										cost_seq_aug_req(mults),
+								},
+						}),
+				},
 		});
 	}
 
@@ -910,14 +941,22 @@ struct ddp {
 	template <typename Mults>
 	auto cost_seq_aug_req(Mults const& mults) const -> mem_req {
 		return mem_req::sum_of({
-				mem_req{tag<scalar>, constraint.ref(dynamics).output_space().max_dim()},
-				mem_req{tag<scalar>, constraint.ref(dynamics).output_space().max_dim()},
+				as_ref,
+				{
+						mem_req{
+								tag<scalar>, constraint.ref(dynamics).output_space().max_dim()},
+						mem_req{
+								tag<scalar>, constraint.ref(dynamics).output_space().max_dim()},
 
-				mem_req::max_of({
-						cost.ref(dynamics).eval_req(),
-						constraint.ref(dynamics).eval_to_req(),
-						mults.eq.eval_to_req(),
-				}),
+						mem_req::max_of({
+								as_ref,
+								{
+										cost.ref(dynamics).eval_req(),
+										constraint.ref(dynamics).eval_to_req(),
+										mults.eq.eval_to_req(),
+								},
+						}),
+				},
 		});
 	}
 

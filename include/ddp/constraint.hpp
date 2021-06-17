@@ -118,7 +118,12 @@ struct config_constraint {
 		struct dim_fn {
 			Fn const& gen;
 			auto operator()(i64 t) const noexcept -> i64 {
-				DynStackView stack{Slice<char>{nullptr, 0}};
+				DynStackView stack{Slice<char>{
+						from_raw_parts,
+						nullptr,
+						0,
+						unsafe,
+				}};
 				return gen(t, stack).rows();
 			}
 		};
@@ -219,7 +224,12 @@ struct velocity_constraint {
 		struct dim_fn {
 			Fn const& gen;
 			auto operator()(i64 t) const noexcept -> i64 {
-				DynStackView stack{Slice<char>{nullptr, 0}};
+				DynStackView stack{Slice<char>{
+						from_raw_parts,
+						nullptr,
+						0,
+						unsafe,
+				}};
 				return gen(t, stack).rows();
 			}
 		};
@@ -325,7 +335,12 @@ struct spatial_constraint {
 			Fn const& gen;
 			Slice<i64 const> frame_ids;
 			auto operator()(i64 t) const noexcept -> i64 {
-				DynStackView stack{Slice<char>{nullptr, 0}};
+				DynStackView stack{Slice<char>{
+						from_raw_parts,
+						nullptr,
+						0,
+						unsafe,
+				}};
 				i64 dim = 0;
 				for (i64 i = 0; i < frame_ids.size(); ++i) {
 					dim += gen(i, t, stack).rows();

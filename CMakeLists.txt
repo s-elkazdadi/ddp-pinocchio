@@ -34,17 +34,13 @@ target_link_libraries(ddp-pinocchio PUBLIC mpfr-cxx veg)
 # Conan dependencies
 set(CONAN_REQUIRES
     # Boost Software License 1.0
-    boost/1.74.0
+    boost/1.76.0
     # MIT License
     fmt/7.1.3
-    spdlog/1.8.2
     backward-cpp/1.5
     #
     # Mozilla Public License 2.0
-    eigen/3.3.7
-    #
-    # New (Revised) BSD License
-    blaze/3.8
+    eigen/3.3.9
     #
     # LGPL v3
     mpfr/4.1.0
@@ -87,9 +83,7 @@ target_link_libraries(
   ddp-pinocchio
   PUBLIC CONAN_PKG::boost
          CONAN_PKG::fmt
-         CONAN_PKG::spdlog
          CONAN_PKG::eigen
-         CONAN_PKG::blaze
          CONAN_PKG::mpfr
          PkgConfig::urdfdom
          PkgConfig::hpp-fcl

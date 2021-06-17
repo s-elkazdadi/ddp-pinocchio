@@ -11,10 +11,10 @@
 
 #include <boost/multiprecision/mpfr.hpp>
 
-namespace mp = boost::multiprecision;
-using bignum_boost = mp::number<
-		mp::backends::mpfr_float_backend<500, mp::allocate_stack>,
-		mp::et_off>;
+namespace boostmp = boost::multiprecision;
+using bignum_boost = boostmp::number<
+		boostmp::backends::mpfr_float_backend<500, boostmp::allocate_stack>,
+		boostmp::et_off>;
 
 using scalar = double;
 
@@ -50,7 +50,7 @@ auto main() -> int {
 			ddp::make::constraint_advance_time<2>( //
 					ddp::make::config_constraint(      //
 							dynamics,
-							[&](i64 t, ddp::dynamic_stack_view stack) {
+							[&](i64 t, ddp::DynStackView stack) {
 								(void)stack;
 								if (t == horizon) {
 									return eigen::as_const(target);

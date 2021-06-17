@@ -26,9 +26,12 @@ struct quadratic_cost_fixed_size {
 		auto eval_req() const -> mem_req { return {tag<T>, 0}; }
 		auto d_eval_to_req() const -> mem_req {
 			return mem_req::max_of({
-					{tag<T>, q.rows()},
-					{tag<T>, r.rows()},
-					{tag<T>, rf.rows()},
+					as_ref,
+					{
+							{tag<T>, q.rows()},
+							{tag<T>, r.rows()},
+							{tag<T>, rf.rows()},
+					},
 			});
 		}
 		auto dd_eval_to_req() const -> mem_req { return {tag<T>, 0}; }
