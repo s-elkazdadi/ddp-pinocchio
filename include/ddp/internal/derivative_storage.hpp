@@ -7,6 +7,7 @@
 #include "ddp/dynamics.hpp"
 #include "ddp/constraint.hpp"
 #include "ddp/trajectory.hpp"
+#include "ddp/internal/thread_pool.hpp"
 #include "veg/util/timer.hpp"
 #include <omp.h>
 #include "veg/internal/prologue.hpp"
@@ -194,30 +195,25 @@ void compute_first_derivatives(
 	}
 }
 
-// #define DDP_OPENMP
-#ifdef DDP_OPENMP
+constexpr auto _min2(i64 a, i64 b) noexcept -> i64 {
+	return a < b ? a : b;
+}
 
 static constexpr i64 max_threads = 16;
 inline auto n_threads() -> i64 {
-	static const i64 result =
-			meta::min2(max_threads, narrow<i64>(omp_get_num_procs()));
+	static const i64 result = (_min2)(max_threads, internal::get_num_procs());
 	return result;
 }
 
-#else
-
-static constexpr i64 max_threads = 1;
-inline auto n_threads() -> i64 {
-	return 1;
+inline auto threaded_req(MemReq single_thread) noexcept -> MemReq {
+	return {single_thread.align, single_thread.size * internal::n_threads()};
 }
-
-#endif
 
 template <typename Cost, typename Dynamics, typename Constraint>
 auto compute_second_derivatives_req(
 		Cost const& cost, Dynamics const& dynamics, Constraint const& constraint)
 		-> MemReq {
-	MemReq single_thread = MemReq::max_of({
+	return MemReq::max_of({
 			as_ref,
 			{
 					cost.d_eval_to_req(),
@@ -228,15 +224,13 @@ auto compute_second_derivatives_req(
 					ddp::second_order_deriv_2_req(constraint),
 			},
 	});
-	i64 n = internal::n_threads();
-	return {single_thread.align, single_thread.size * n};
 }
 
 template <typename Cost, typename Dynamics, typename Constraint>
 auto compute_second_derivatives_test_req(
 		Cost const& cost, Dynamics const& dynamics, Constraint const& constraint)
 		-> MemReq {
-	MemReq single_thread = MemReq::sum_of({
+	return MemReq::sum_of({
 			as_ref,
 			{
 					{
@@ -276,8 +270,6 @@ auto compute_second_derivatives_test_req(
 					}),
 			},
 	});
-	i64 n = internal::n_threads();
-	return {single_thread.align, single_thread.size * n};
 }
 
 // multi threaded
@@ -290,10 +282,12 @@ auto compute_second_derivatives(
 		Trajectory<T> const& traj,
 		DynStackView stack,
 		bool multithread) -> i64 {
+	fmt::print("");
 	i64 nanosec{};
+	using Key = decltype(dynamics.acquire_workspace());
 	{
-		auto&& _ =
-				time::raii_timer([&](i64 duration) noexcept { nanosec = duration; });
+		auto&& _ = veg::time::raii_timer(
+				[&](i64 duration) noexcept { nanosec = duration; });
 		unused(_);
 
 		auto const& _lx = derivs.FirstOrderDerivatives<T>::self.lx;
@@ -311,56 +305,104 @@ auto compute_second_derivatives(
 		} else {
 			auto const n_threads = internal::n_threads();
 
-			Option<DynStackArray<StorageFor<T>>> stack_buffers[max_threads];
+			veg::Array<Option<DynStackArray<StorageFor<T>>>, max_threads>
+					stack_buffers;
 
 			{
 				i64 stack_len = stack.remaining_bytes() / n_threads / i64(sizeof(T));
 
 				for (i64 i = 0; i < n_threads; ++i) {
-					stack_buffers[i] = stack.make_new(tag<StorageFor<T>>, stack_len);
+					stack_buffers._[i] = stack.make_new(tag<StorageFor<T>>, stack_len);
+					VEG_ASSERT(stack_buffers._[i].is_some());
 				}
 			}
 
-#ifdef DDP_OPENMP
-#pragma omp parallel default(none) shared(stack_buffers) shared(derivs)        \
-		shared(cost) shared(dynamics) shared(constraint) shared(traj)              \
-				shared(stack) shared(begin) shared(end) num_threads(n_threads)
-#endif
-			{
+			struct State { /* NOLINT */
+				DynStackView thread_stack;
+				Key k;
+			};
 
-				auto k = dynamics.acquire_workspace();
+			veg::Array<Option<State>, max_threads> states;
+			auto setup = [&](i64 id) -> void* {
+				VEG_ASSERT(id < n_threads);
+				states._[id] = {
+						some,
+						{
+								{slice::from_range(stack_buffers._[id].as_ref().unwrap())},
+								dynamics.acquire_workspace(),
+						},
+				};
+				State& state = states._[id].as_ref().unwrap();
+				auto&& k = static_cast<Key&&>(state.k);
 
-				i64 const thread_num = omp_get_thread_num();
-				VEG_ASSERT(thread_num < internal::n_threads());
-
-				DynStackView thread_stack = {slice::from_range(
-						stack_buffers[omp_get_thread_num()].as_ref().unwrap())};
-
-				if (thread_num == 0) {
-					k = cost.d_eval_final_to(derivs.lfx(), traj.x_f(), VEG_FWD(k), stack);
+				if (id == 0) {
+					k = cost.d_eval_final_to(
+							derivs.lfx(), traj.x_f(), VEG_FWD(k), state.thread_stack);
 					k = cost.dd_eval_final_to(
-							derivs.lfxx(), traj.x_f(), VEG_FWD(k), stack);
+							derivs.lfxx(), traj.x_f(), VEG_FWD(k), state.thread_stack);
 				}
 
-#ifdef DDP_OPENMP
-#pragma omp for
-#endif
-				for (usize i = 0; i < narrow<usize>(end - begin); ++i) {
-					i64 t = begin + narrow<i64>(i);
-					k = compute_second_derivatives_one_iter(
-							derivs,
-							cost,
-							dynamics,
-							constraint,
-							traj,
-							t,
-							VEG_FWD(k),
-							thread_stack);
-				}
-			}
+				return mem::addressof(state);
+			};
+			auto fn = [&](void* vstate, i64 id, i64 i) {
+				(void)id;
+				State& state = *static_cast<State*>(vstate);
+				auto& thread_stack = state.thread_stack;
+				auto&& k = VEG_FWD(state.k);
+
+				k = compute_second_derivatives_one_iter(
+						derivs,
+						cost,
+						dynamics,
+						constraint,
+						traj,
+						i,
+						VEG_FWD(k),
+						thread_stack);
+			};
+			internal::parallel_for({as_ref, setup}, {as_ref, fn}, begin, end);
+
+			// #ifdef DDP_OPENMP
+			// #pragma omp parallel default(none) shared(stack_buffers) shared(derivs)
+			// \
+// 		shared(cost) shared(dynamics) shared(constraint) shared(traj) \
+// 				shared(stack) shared(begin) shared(end) num_threads(n_threads)
+			// #endif
+			// 			{
+
+			// 				auto k = dynamics.acquire_workspace();
+
+			// 				i64 const thread_num = omp_get_thread_num();
+			// 				VEG_ASSERT(thread_num < internal::n_threads());
+
+			// 				DynStackView thread_stack = {slice::from_range(
+			// 						stack_buffers._[omp_get_thread_num()].as_ref().unwrap())};
+
+			// 				if (thread_num == 0) {
+			// 					k = cost.d_eval_final_to(derivs.lfx(), traj.x_f(), VEG_FWD(k),
+			// stack); 					k = cost.dd_eval_final_to( 							derivs.lfxx(),
+			// traj.x_f(), VEG_FWD(k), stack);
+			// 				}
+
+			// #ifdef DDP_OPENMP
+			// #pragma omp for
+			// #endif
+			// 				for (usize i = 0; i < narrow<usize>(end - begin); ++i) {
+			// 					i64 t = begin + narrow<i64>(i);
+			// 					k = compute_second_derivatives_one_iter(
+			// 							derivs,
+			// 							cost,
+			// 							dynamics,
+			// 							constraint,
+			// 							traj,
+			// 							t,
+			// 							VEG_FWD(k),
+			// 							thread_stack);
+			// 				}
+			// 			}
 		}
 	}
-	time::log_elapsed_time{"computing derivatives"}(nanosec);
+	veg::time::log_elapsed_time{"computing derivatives"}(nanosec);
 	return nanosec;
 }
 
@@ -391,6 +433,9 @@ auto compute_second_derivatives_one_iter(
 	}
 	{
 		VEG_ASSERT(!eigen::aliases(derivs.fx(t), x));
+		VEG_ASSERT(
+				stack.remaining_bytes() >=
+				ddp::second_order_deriv_1_req(dynamics).size);
 		k = ddp::second_order_deriv_1(
 				dynamics,
 				derivs.fxx(t),
@@ -420,7 +465,7 @@ auto compute_second_derivatives_one_iter(
 				VEG_FWD(k),
 				stack);
 	}
-#if DNDEBUG
+#ifndef NDEBUG
 	{
 		VEG_ASSERT_ALL_OF( //
 				!derivs.eq(t).hasNaN(),
@@ -503,11 +548,27 @@ auto compute_second_derivatives_one_iter(
 			dynamics.control_space().integrate(
 					eigen::as_mut(u_), t, eigen::as_const(u), eigen::as_const(du), stack);
 
-			l = cost.eval(t, x, u, stack);
+			auto l = [&] {
+				VEG_BIND(auto, (_, l), cost.eval(t, x, u, VEG_FWD(k), stack));
+				k = VEG_FWD(_);
+				return VEG_FWD(l);
+			}();
 			k = dynamics.eval_to(eigen::as_mut(f), t, x, u, VEG_FWD(k), stack);
 			k = constraint.eval_to(eigen::as_mut(eq), t, x, u, VEG_FWD(k), stack);
 
-			l_ = cost.eval(t, eigen::as_const(x_), eigen::as_const(u_), stack);
+			auto l_ = [&] {
+				VEG_BIND(
+						auto,
+						(_, l),
+						cost.eval(
+								t,
+								eigen::as_const(x_),
+								eigen::as_const(u_),
+								VEG_FWD(k),
+								stack));
+				k = VEG_FWD(_);
+				return VEG_FWD(l);
+			}();
 			k = dynamics.eval_to(
 					eigen::as_mut(f_),
 					t,

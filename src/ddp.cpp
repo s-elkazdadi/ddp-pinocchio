@@ -1,8 +1,5 @@
 #include <ddp/internal/eigen.hpp>
-#include <deque>
-#include <thread>
-#include <condition_variable>
-#include <mutex>
+#include <omp.h>
 
 template auto ddp::eigen::internal::format_impl(
 		fmt::basic_format_context<fmt::v7::detail::buffer_appender<char>, char>& fc,
@@ -28,34 +25,32 @@ template auto ddp::eigen::internal::format_impl(
 namespace ddp {
 namespace internal {
 
-using ThreadFn =
-		fn::FnView<void(i64 thread_id, i64 begin_index, i64 end_index)>;
-
-struct Consumer {
-	std::condition_variable condvar;
-	std::mutex mtx;
-	Option<ThreadFn> current;
-
-	void operator()() {
-    // condvar.wait(mtx);
-	}
-};
-
-struct WorkThread {
-	std::thread thrd;
-};
-
-std::deque<std::thread> thread_pool{};
+auto get_num_procs() noexcept -> i64 {
+	return omp_get_num_procs();
+}
 
 void set_num_threads(i64 n_threads) {
-	thread_pool.resize(n_threads);
+	omp_set_num_threads(narrow<int>(n_threads));
 }
-auto get_num_procs() noexcept -> i64;
 
 void parallel_for(
-		fn::FnView<void(i64 thread_id, i64 begin_index, i64 end_index)> fn,
+		FnView<auto(i64 id)->void*> setup,
+		FnView<void(void* state, i64 id, i64 i)> fn,
 		i64 begin,
-		i64 end);
+		i64 end) {
+	auto const len = narrow<usize>(end - begin);
+
+// #pragma omp parallel 
+	{
+		i64 const thread_num = omp_get_thread_num();
+		void* state = setup(thread_num);
+
+// #pragma omp for
+		for (usize i = 0; i < len; ++i) {
+      fn(state, thread_num, begin + i64(i));
+		}
+	}
+}
 
 } // namespace internal
 } // namespace ddp

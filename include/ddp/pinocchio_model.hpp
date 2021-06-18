@@ -155,7 +155,7 @@ public:
       ConstVec q,                                                  //
       ConstVec v,                                                  //
       ConstVec tau,                                                // use a generator for `fext' because
-      Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, // pinocchio's aligned vector, and ForceTpl
+      Option<FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, // pinocchio's aligned vector, and ForceTpl
       Key k                                                         // are not visible
   ) const -> Key;
 	// clang-format on
@@ -165,7 +165,7 @@ public:
 			ConstVec q,             //
 			ConstVec v,             //
 			ConstVec a,             //
-			Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>>
+			Option<FnView<Option<Tuple<i64, Force<T>>>()>>
 					fext_gen, // pinocchio's aligned vector, and ForceTpl
 			Key k         //
 	) const -> Key;
@@ -178,7 +178,7 @@ public:
 			ConstVec q,                      //
 			ConstVec v,                      //
 			ConstVec tau,                    //
-			Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>>
+			Option<FnView<Option<Tuple<i64, Force<T>>>()>>
 					fext_gen, // pinocchio's aligned vector, and ForceTpl
 			Key k         //
 	) const -> Key;
@@ -190,7 +190,7 @@ public:
 			ConstVec q,               //
 			ConstVec v,               //
 			ConstVec a,               //
-			Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>>
+			Option<FnView<Option<Tuple<i64, Force<T>>>()>>
 					fext_gen, // pinocchio's aligned vector, and ForceTpl
 			Key k         //
 	) const -> Key;

@@ -11,7 +11,8 @@ void set_num_threads(i64 n_threads);
 auto get_num_procs() noexcept -> i64;
 
 void parallel_for(
-		fn::FnView<void(i64 thread_id, i64 begin_index, i64 end_index)> fn,
+		FnView<auto(i64 id)->void*> setup,
+		FnView<void(void* state, i64 id, i64 i)> fn,
 		i64 begin,
 		i64 end);
 

@@ -45,9 +45,7 @@ set(CONAN_REQUIRES
     # LGPL v3
     mpfr/4.1.0
 )
-target_compile_definitions(
-  ddp-pinocchio PUBLIC SPDLOG_FMT_EXTERNAL
-)
+
 set(CONAN_OPTIONS)
 run_conan()
 

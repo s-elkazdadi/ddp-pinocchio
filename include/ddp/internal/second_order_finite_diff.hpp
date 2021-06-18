@@ -8,13 +8,35 @@ namespace ddp {
 
 template <typename Fn>
 auto second_order_deriv_1_req(Fn const& fn) noexcept -> MemReq {
-	return MemReq::max_of(
-			{as_ref,
-	     {
-					 fn.d_eval_to_req(),
-					 fn.state_space().integrate_req(),
-					 fn.control_space().integrate_req(),
-			 }});
+	i64 nx = fn.state_space().max_dim();
+	i64 ndx = fn.state_space().max_ddim();
+	i64 nu = fn.control_space().max_dim();
+	i64 ndu = fn.control_space().max_ddim();
+	i64 no = fn.output_space().max_dim();
+	i64 ndo = fn.output_space().max_ddim();
+	return MemReq::sum_of({
+			as_ref,
+			{
+					MemReq{
+							tag<typename Fn::Scalar>,
+							(ndo * ndx   // fx
+	             + ndo * ndu // fu
+	             + no        // out_
+	             + nx        // x_
+	             + nu        // u_
+	             + ndx       // dx
+	             + ndu       // du
+	             ),
+					},
+					MemReq::max_of(
+							{as_ref,
+	             {
+									 fn.d_eval_to_req(),
+									 fn.state_space().integrate_req(),
+									 fn.control_space().integrate_req(),
+							 }}),
+			},
+	});
 }
 
 template <typename Fn, typename Key, typename T = typename Fn::Scalar>
@@ -31,6 +53,9 @@ auto second_order_deriv_1(
 		View<T const, colvec> u,
 		Key k,
 		DynStackView stack) -> Key {
+
+	auto _ = (stack.make_new_for_overwrite(tag<T>, 0)).unwrap();
+	VEG_ASSERT(stack.remaining_bytes() >= ddp::second_order_deriv_1_req(fn).size);
 
 	auto odim = out_xx.outdim();
 	auto xdim = out_xx.indiml();

@@ -137,7 +137,7 @@ struct PinocchioImpl {
 	template <typename T>
 	static void from_model_geom_builder(
 			Model<T>& m,
-			fn::FnView<void(pin::Model&, bool)> builder,
+			FnView<void(pin::Model&, bool)> builder,
 			i64 n_parallel,
 			bool add_freeflyer_base) {
 		VEG_ASSERT_ALL_OF( //
@@ -183,7 +183,7 @@ struct PinocchioImpl {
 template <typename T>
 Model<T>::Model(
 		::fmt::string_view urdf_path, i64 n_parallel, bool add_freeflyer_base) {
-	using FnView = fn::FnView<void(pin::Model&, bool)>;
+	using FnView = veg::fn::FnView<void(pin::Model&, bool)>;
 	internal::PinocchioImpl::from_model_geom_builder(
 			*this,
 			FnView{as_ref, internal::BuilderFromUrdf{urdf_path}},
@@ -193,7 +193,7 @@ Model<T>::Model(
 
 template <typename T>
 auto Model<T>::all_joints_test_model(i64 n_parallel) -> Model {
-	using FnView = fn::FnView<void(pin::Model&, bool)>;
+	using FnView = veg::fn::FnView<void(pin::Model&, bool)>;
 	Model m;
 	internal::PinocchioImpl::from_model_geom_builder(
 			m, FnView{as_ref, &pin::buildAllJointsModel}, n_parallel, false);
@@ -379,7 +379,7 @@ void Model<T>::d_difference_dq_finish(
 }
 
 template <typename T>
-auto collect(i64 njoints, fn::FnView<Option<Tuple<i64, Force<T>>>()> fext)
+auto collect(i64 njoints, FnView<Option<Tuple<i64, Force<T>>>()> fext)
 		-> pin::container::aligned_vector<pin::ForceTpl<T>> {
 
 	pin::container::aligned_vector<pin::ForceTpl<T>> external_forces(
@@ -406,13 +406,13 @@ auto collect(i64 njoints, fn::FnView<Option<Tuple<i64, Force<T>>>()> fext)
 }
 
 template <typename T>
-auto Model<T>::dynamics_aba(                                     //
-		MutVec out_acceleration,                                     //
-		ConstVec q,                                                  //
-		ConstVec v,                                                  //
-		ConstVec tau,                                                //
-		Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
-		Key k                                                        //
+auto Model<T>::dynamics_aba(                                 //
+		MutVec out_acceleration,                                 //
+		ConstVec q,                                              //
+		ConstVec v,                                              //
+		ConstVec tau,                                            //
+		Option<FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
+		Key k                                                    //
 ) const -> Key {
 	VEG_DEBUG_ASSERT_ALL_OF(
 			(out_acceleration.rows() == self.tangent_dim),
@@ -452,13 +452,13 @@ auto Model<T>::dynamics_aba(                                     //
 }
 
 template <typename T>
-auto Model<T>::inverse_dynamics_rnea(                            //
-		MutVec out_tau,                                              //
-		ConstVec q,                                                  //
-		ConstVec v,                                                  //
-		ConstVec a,                                                  //
-		Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
-		Key k                                                        //
+auto Model<T>::inverse_dynamics_rnea(                        //
+		MutVec out_tau,                                          //
+		ConstVec q,                                              //
+		ConstVec v,                                              //
+		ConstVec a,                                              //
+		Option<FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
+		Key k                                                    //
 ) const -> Key {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
@@ -499,16 +499,16 @@ auto Model<T>::inverse_dynamics_rnea(                            //
 }
 
 template <typename T>
-auto Model<T>::d_dynamics_aba(                                   //
-		MutColMat out_acceleration_dq,                               //
-		MutColMat out_acceleration_dv,                               //
-		MutColMat out_acceleration_dtau,                             //
-		MutVec out_acceleration,                                     //
-		ConstVec q,                                                  //
-		ConstVec v,                                                  //
-		ConstVec tau,                                                //
-		Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
-		Key k                                                        //
+auto Model<T>::d_dynamics_aba(                               //
+		MutColMat out_acceleration_dq,                           //
+		MutColMat out_acceleration_dv,                           //
+		MutColMat out_acceleration_dtau,                         //
+		MutVec out_acceleration,                                 //
+		ConstVec q,                                              //
+		ConstVec v,                                              //
+		ConstVec tau,                                            //
+		Option<FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
+		Key k                                                    //
 ) const -> Key {
 
 	VEG_DEBUG_ASSERT_ALL_OF(
@@ -600,15 +600,15 @@ auto Model<T>::d_dynamics_aba(                                   //
 }
 
 template <typename T>
-auto Model<T>::d_inverse_dynamics_rnea(                          //
-		MutColMat out_tau_dq,                                        //
-		MutColMat out_tau_dv,                                        //
-		MutColMat out_tau_da,                                        //
-		ConstVec q,                                                  //
-		ConstVec v,                                                  //
-		ConstVec a,                                                  //
-		Option<fn::FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
-		Key k                                                        //
+auto Model<T>::d_inverse_dynamics_rnea(                      //
+		MutColMat out_tau_dq,                                    //
+		MutColMat out_tau_dv,                                    //
+		MutColMat out_tau_da,                                    //
+		ConstVec q,                                              //
+		ConstVec v,                                              //
+		ConstVec a,                                              //
+		Option<FnView<Option<Tuple<i64, Force<T>>>()>> fext_gen, //
+		Key k                                                    //
 ) const -> Key {
 
 	VEG_DEBUG_ASSERT_ALL_OF(

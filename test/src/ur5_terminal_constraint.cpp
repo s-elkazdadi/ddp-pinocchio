@@ -32,7 +32,7 @@ auto main() -> int {
 
 	ddp::pinocchio::Model<scalar> m{
 			EXAMPLE_ROBOT_DATA_MODEL_DIR "/ur_description/urdf/ur5_gripper.urdf",
-			::omp_get_num_procs()};
+			omp_get_num_procs()};
 
 	auto nq = m.config_dim();
 	auto nv = m.tangent_dim();

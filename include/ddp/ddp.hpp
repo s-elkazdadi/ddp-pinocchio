@@ -369,8 +369,8 @@ struct Ddp {
 		return MemReq::max_of({
 				as_ref,
 				{
-						internal::compute_second_derivatives_req(
-								cost.ref(dynamics), dynamics, constraint.ref(dynamics)),
+						internal::threaded_req(internal::compute_second_derivatives_req(
+								cost.ref(dynamics), dynamics, constraint.ref(dynamics))),
 						mults.eq.update_origin_req(),
 						fb_seq.update_origin_req(),
 						optimality_obj_req(mults),
@@ -459,6 +459,8 @@ struct Ddp {
 			Scalar mu,
 			trajectory traj) -> Tuple<trajectory, ControlFeedback> {
 
+		internal::set_num_threads(internal::get_num_procs());
+
 		auto mult = zero_multipliers<M>(traj);
 		auto reg = Regularization<Scalar>{0, 1, 2, 1e-5};
 		auto ctrl = ControlFeedback(
@@ -484,10 +486,11 @@ struct Ddp {
 										as_ref,
 										{
 												update_derivatives_req(ctrl, mult),
-												internal::compute_second_derivatives_test_req(
-														cost.ref(dynamics),
-														dynamics,
-														constraint.ref(dynamics)),
+												internal::threaded_req(
+														internal::compute_second_derivatives_test_req(
+																cost.ref(dynamics),
+																dynamics,
+																constraint.ref(dynamics))),
 										},
 								}),
 								fwd_pass_req(traj, mult),
@@ -579,7 +582,8 @@ struct Ddp {
 			}
 
 			{
-				auto&& _ = time::raii_timer(time::log_elapsed_time("bwd pass"));
+				auto&& _ =
+						veg::time::raii_timer(veg::time::log_elapsed_time("bwd pass"));
 				veg::unused(_);
 
 				bwd_pass(ctrl, reg, mu, traj, mult, derivs, stack);
@@ -597,7 +601,8 @@ struct Ddp {
 					n);
 
 			{
-				auto&& _ = time::raii_timer(time::log_elapsed_time("fwd pass"));
+				auto&& _ =
+						veg::time::raii_timer(veg::time::log_elapsed_time("fwd pass"));
 				veg::unused(_);
 
 				auto res = fwd_pass(

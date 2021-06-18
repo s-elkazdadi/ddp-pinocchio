@@ -22,9 +22,29 @@
 #define DDP_NODISCARD VEG_NODISCARD
 
 namespace ddp {
-using namespace veg;
-namespace make {
-} // namespace make
+using namespace veg::tags;
+using namespace veg::literals;
+namespace slice = veg::slice;
+namespace mem = veg::mem;
+
+using veg::i64;
+using veg::usize;
+
+using veg::Tag;
+using veg::tag;
+
+using veg::narrow;
+using veg::unused;
+
+using veg::Slice;
+using veg::Array;
+using veg::Option;
+using veg::Tuple;
+using veg::fn::FnView;
+using veg::DynStackView;
+using veg::DynStackArray;
+
+namespace make {} // namespace make
 namespace meta {
 using namespace veg::meta;
 } // namespace meta

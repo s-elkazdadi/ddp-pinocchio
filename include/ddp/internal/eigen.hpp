@@ -168,7 +168,7 @@ auto format_impl(
 		::fmt::basic_format_context<OutIt, char>& fc,
 		i64 rows,
 		i64 cols,
-		fn::FnView<T(i64, i64)> getter,
+		FnView<T(i64, i64)> getter,
 		FmtFormatter<T>& fmt) -> decltype(fc.out()) {
 	auto out = fc.out();
 
@@ -246,7 +246,7 @@ extern template auto ddp::eigen::internal::format_impl(
 				fc,
 		i64 rows,
 		i64 cols,
-		fn::FnView<float(i64, i64)> getter,
+		FnView<float(i64, i64)> getter,
 		FmtFormatter<float>& fmt) -> decltype(fc.out());
 
 extern template auto ddp::eigen::internal::format_impl(
@@ -254,7 +254,7 @@ extern template auto ddp::eigen::internal::format_impl(
 				fc,
 		i64 rows,
 		i64 cols,
-		fn::FnView<double(i64, i64)> getter,
+		FnView<double(i64, i64)> getter,
 		FmtFormatter<double>& fmt) -> decltype(fc.out());
 
 extern template auto ddp::eigen::internal::format_impl(
@@ -262,7 +262,7 @@ extern template auto ddp::eigen::internal::format_impl(
 				fc,
 		i64 rows,
 		i64 cols,
-		fn::FnView<long double(i64, i64)> getter,
+		FnView<long double(i64, i64)> getter,
 		FmtFormatter<long double>& fmt) -> decltype(fc.out());
 
 template <typename T>
@@ -494,7 +494,7 @@ struct as_const {
 struct as_mut {
 	DDP_TEMPLATE(
 			typename T,
-			requires(DDP_CONCEPT(eigen::matrix<uncvref_t<T>>)),
+			requires(DDP_CONCEPT(eigen::matrix<meta::uncvref_t<T>>)),
 			DDP_NODISCARD HEDLEY_ALWAYS_INLINE auto
 			operator(),
 			(mat, T&&))
@@ -508,7 +508,7 @@ struct as_mut {
 struct split_at_row {
 	DDP_TEMPLATE(
 			typename T,
-			requires(DDP_CONCEPT(eigen::matrix<uncvref_t<T>>)),
+			requires(DDP_CONCEPT(eigen::matrix<meta::uncvref_t<T>>)),
 			auto
 			operator(),
 			(mat, T&&),
@@ -530,7 +530,7 @@ struct split_at_row {
 struct split_at_col {
 	DDP_TEMPLATE(
 			typename T,
-			requires(DDP_CONCEPT(eigen::matrix<uncvref_t<T>>)),
+			requires(DDP_CONCEPT(eigen::matrix<meta::uncvref_t<T>>)),
 			auto
 			operator(),
 			(mat, T&&),
@@ -552,7 +552,7 @@ struct split_at_col {
 struct split_at {
 	DDP_TEMPLATE(
 			typename T,
-			requires(DDP_CONCEPT(eigen::matrix<uncvref_t<T>>)),
+			requires(DDP_CONCEPT(eigen::matrix<meta::uncvref_t<T>>)),
 			auto
 			operator(),
 			(mat, T&&),
@@ -648,14 +648,16 @@ struct assign {
 	DDP_TEMPLATE(
 			(typename Out, typename In),
 			requires(
-					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
-					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<meta::uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<meta::uncvref_t<Out>&, Out&>) &&
 					DDP_CONCEPT(eigen::matrix<In>) && //
-					VEG_CONCEPT(same<scalar_t<In>, scalar_t<uncvref_t<Out>>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<In>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, cols_t<In>>)),
+					VEG_CONCEPT(same<scalar_t<In>, scalar_t<meta::uncvref_t<Out>>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<In>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											cols_t<meta::uncvref_t<Out>>,
+											cols_t<In>>)),
 			void
 			operator(),
 			(out, Out&&),
@@ -666,25 +668,29 @@ struct add_to {
 	DDP_TEMPLATE(
 			(typename Out, typename Lhs, typename Rhs),
 			requires(
-					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
-					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<meta::uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<meta::uncvref_t<Out>&, Out&>) &&
 					DDP_CONCEPT(eigen::matrix<Lhs>) && //
 					DDP_CONCEPT(eigen::matrix<Rhs>) &&
-					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<uncvref_t<Out>>>) &&
-					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<meta::uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<meta::uncvref_t<Out>>>) &&
 
 					DDP_CONCEPT(eigen::aux::maybe_same<rows_t<Lhs>, rows_t<Rhs>>) &&
 					DDP_CONCEPT(eigen::aux::maybe_same<cols_t<Lhs>, cols_t<Rhs>>) &&
 
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<Lhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<Lhs>>) &&
 
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Rhs>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Rhs>>)),
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<Rhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<Rhs>>)),
 			void
 			operator(),
 			(out, Out&&),
@@ -696,25 +702,29 @@ struct sub_to {
 	DDP_TEMPLATE(
 			(typename Out, typename Lhs, typename Rhs),
 			requires(
-					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
-					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<meta::uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<meta::uncvref_t<Out>&, Out&>) &&
 					DDP_CONCEPT(eigen::matrix<Lhs>) && //
 					DDP_CONCEPT(eigen::matrix<Rhs>) &&
-					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<uncvref_t<Out>>>) &&
-					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<meta::uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<meta::uncvref_t<Out>>>) &&
 
 					DDP_CONCEPT(eigen::aux::maybe_same<rows_t<Lhs>, rows_t<Rhs>>) &&
 					DDP_CONCEPT(eigen::aux::maybe_same<cols_t<Lhs>, rows_t<Rhs>>) &&
 
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<Lhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											cols_t<meta::uncvref_t<Out>>,
+											rows_t<Lhs>>) &&
 
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Rhs>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<Rhs>>)),
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<Rhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											cols_t<meta::uncvref_t<Out>>,
+											rows_t<Rhs>>)),
 			void
 			operator(),
 			(out, Out&&),
@@ -726,14 +736,16 @@ struct mul_scalar_to {
 	DDP_TEMPLATE(
 			(typename Out, typename In),
 			requires(
-					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
-					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<meta::uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<meta::uncvref_t<Out>&, Out&>) &&
 					DDP_CONCEPT(eigen::matrix<In>) &&
-					VEG_CONCEPT(same<scalar_t<In>, scalar_t<uncvref_t<Out>>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<In>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<In>>)),
+					VEG_CONCEPT(same<scalar_t<In>, scalar_t<meta::uncvref_t<Out>>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<In>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											cols_t<meta::uncvref_t<Out>>,
+											rows_t<In>>)),
 			void
 			operator(),
 			(out, Out&&),
@@ -745,14 +757,16 @@ struct mul_scalar_add_to {
 	DDP_TEMPLATE(
 			(typename Out, typename In),
 			requires(
-					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
-					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<meta::uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<meta::uncvref_t<Out>&, Out&>) &&
 					DDP_CONCEPT(eigen::matrix<In>) &&
-					VEG_CONCEPT(same<scalar_t<In>, scalar_t<uncvref_t<Out>>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<In>>) &&
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<In>>)),
+					VEG_CONCEPT(same<scalar_t<In>, scalar_t<meta::uncvref_t<Out>>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<In>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											cols_t<meta::uncvref_t<Out>>,
+											rows_t<In>>)),
 			void
 			operator(),
 			(out, Out&&),
@@ -765,20 +779,22 @@ struct mul_add_to_noalias {
 	DDP_TEMPLATE(
 			(typename Out, typename Lhs, typename Rhs),
 			requires(
-					DDP_CONCEPT(eigen::matrix<uncvref_t<Out>>) &&
-					VEG_CONCEPT(constructible<uncvref_t<Out>&, Out&>) &&
+					DDP_CONCEPT(eigen::matrix<meta::uncvref_t<Out>>) &&
+					VEG_CONCEPT(constructible<meta::uncvref_t<Out>&, Out&>) &&
 					DDP_CONCEPT(eigen::matrix<Lhs>) && //
 					DDP_CONCEPT(eigen::matrix<Rhs>) &&
-					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<uncvref_t<Out>>>) &&
-					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Lhs>, scalar_t<meta::uncvref_t<Out>>>) &&
+					VEG_CONCEPT(same<scalar_t<Rhs>, scalar_t<meta::uncvref_t<Out>>>) &&
 
 					DDP_CONCEPT(eigen::aux::maybe_same<cols_t<Lhs>, rows_t<Rhs>>) &&
 
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<rows_t<uncvref_t<Out>>, rows_t<Lhs>>) &&
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											rows_t<meta::uncvref_t<Out>>,
+											rows_t<Lhs>>) &&
 
-					DDP_CONCEPT(
-							eigen::aux::maybe_same<cols_t<uncvref_t<Out>>, rows_t<Rhs>>)),
+					DDP_CONCEPT(eigen::aux::maybe_same<
+											cols_t<meta::uncvref_t<Out>>,
+											rows_t<Rhs>>)),
 			void
 			operator(),
 			(out, Out&&),
@@ -811,12 +827,13 @@ struct add_identity {
 	DDP_TEMPLATE(
 			typename T,
 			requires(
-					DDP_CONCEPT(eigen::matrix<uncvref_t<T>>) &&
-					VEG_CONCEPT(constructible<uncvref_t<T>&, T&>)),
+					DDP_CONCEPT(eigen::matrix<meta::uncvref_t<T>>) &&
+					VEG_CONCEPT(constructible<meta::uncvref_t<T>&, T&>)),
 			void
 			operator(),
 			(mat, T&&),
-			(factor = scalar_t<uncvref_t<T>>(1), scalar_t<uncvref_t<T>> const&))
+			(factor = scalar_t<meta::uncvref_t<T>>(1),
+	     scalar_t<meta::uncvref_t<T>> const&))
 	const {
 		auto _mat = as_mut{}(mat);
 		i64 const small_dim = _mat.rows() < _mat.cols() ? _mat.rows() : _mat.cols();
